@@ -61,9 +61,12 @@ function weights(pm, fp, fm, c)
     ϵ = 1e-6
 
     if pm == 1
-        @views IS0 = @. 13/12 * (fp[c-2] - 2 * fp[c-1] + fp[c])^2 + 1/4 * (fp[c-2] - 4 * fp[c-1] + 3 * fp[c])^2
-        @views IS1 = @. 13/12 * (fp[c-1] - 2 * fp[c] + fp[c+1])^2 + 1/4 * (fp[c-1] - fp[c+1])^2
-        @views IS2 = @. 13/12 * (fp[c] - 2 * fp[c+1] + fp[c+2])^2 + 1/4 * (3 * fp[c] - 4 * fp[c+1] + fp[c+2])^2
+        @views IS0 = @. 13/12 * (fp[c-2] - 2 * fp[c-1] + fp[c])^2 +
+                          1/4 * (fp[c-2] - 4 * fp[c-1] + 3 * fp[c])^2
+        @views IS1 = @. 13/12 * (fp[c-1] - 2 * fp[c] + fp[c+1])^2 +
+                          1/4 * (fp[c-1] - fp[c+1])^2
+        @views IS2 = @. 13/12 * (fp[c] - 2 * fp[c+1] + fp[c+2])^2 +
+                          1/4 * (3 * fp[c] - 4 * fp[c+1] + fp[c+2])^2
 
         # Yamaleev and Carpenter, 2009
         @views τ = @. (fp[c-2] - 4 * fp[c-1] + 6 * fp[c] - 4 * fp[c+1] + fp[c+2])^2
@@ -77,9 +80,12 @@ function weights(pm, fp, fm, c)
         # α2 = @. 3/10 / (ϵ + IS2)^2
 
     elseif pm == -1
-        @views IS0 = @. 13/12 * (fm[c-1] - 2 * fm[c] + fm[c+1])^2 + 1/4 * (fm[c-1] - 4 * fm[c] + 3 * fm[c+1])^2
-        @views IS1 = @. 13/12 * (fm[c] - 2 * fm[c+1] + fm[c+2])^2 + 1/4 * (fm[c] - fm[c+2])^2
-        @views IS2 = @. 13/12 * (fm[c+1] - 2 * fm[c+2] + fm[c+3])^2 + 1/4 * (3 * fm[c+1] - 4 * fm[c+2] + fm[c+3])^2
+        @views IS0 = @. 13/12 * (fm[c-1] - 2 * fm[c] + fm[c+1])^2 +
+                          1/4 * (fm[c-1] - 4 * fm[c] + 3 * fm[c+1])^2
+        @views IS1 = @. 13/12 * (fm[c] - 2 * fm[c+1] + fm[c+2])^2 +
+                          1/4 * (fm[c] - fm[c+2])^2
+        @views IS2 = @. 13/12 * (fm[c+1] - 2 * fm[c+2] + fm[c+3])^2 +
+                          1/4 * (3 * fm[c+1] - 4 * fm[c+2] + fm[c+3])^2
 
         @views τ = @. (fm[c-1] - 4 * fm[c] + 6 * fm[c+1] - 4 * fm[c+2] + fm[c+3])^2
         α0 = @. 3/10 * (1 + (τ / (ϵ + IS0))^2)
