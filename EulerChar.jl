@@ -8,116 +8,140 @@
 # For a gas with 5 dofs, γ = 7/5.
 
 include("./WenoChar.jl")
-import .Weno
-import Plots, Printf
+import .WenoChar
+import Printf
+import Plots
 
-function primitive_to_conserved(ρ, u, P, γ)
-    ρu = @. ρ * u
-    E  = @. P / (γ-1.) + 1/2 * ρ * u^2
-    return ρu, E
+
+struct Variables{T}
+    ρ::Vector{T}    # density
+    u::Vector{T}    # velocity
+    P::Vector{T}    # pressure
+    ρu::Vector{T}   # momentum
+    E::Vector{T}    # energy
 end
 
-function conserved_to_primitive(ρ, ρu, E, γ)
-    u = @. ρu / ρ
-    P = @. (γ-1) * (E - ρu^2 / (2 * ρ))
-    return u, P
+struct Fluxes{T}
+    f1::Vector{T}   # real space
+    f2::Vector{T}
+    f3::Vector{T}
+    g1::Vector{T}   # characteristic space
+    g2::Vector{T}
+    g3::Vector{T}
 end
 
-function h(γ, ρ, u, P)
-    return γ/(γ-1) * P / ρ + 1/2 * u^2
+
+function preallocate_variables(grpar)
+    for x in [:ρ, :u, :P, :ρu, :E]
+        @eval $x = zeros($grpar.nx)
+    end
+    return Variables(ρ, u, P, ρu, E)
 end
 
-function roe_average(ρ, u, h, γ)
-    denom = √(ρ[i]) + √(ρ[i+1])
-    u_avg = (√(ρ[i]) * u[i] + √(ρ[i+1]) * u[i+1]) / denom
-    h_avg = (√(ρ[i]) * h[i] + √(ρ[i+1]) * h[i+1]) / denom
-    c_avg = √((γ-1.) * (h_avg - 1/2 * u_avg^2))
-    return u_avg, h_avg, c_avg
+function preallocate_fluxes(grpar)
+    for x in [:f1, :f2, :f3, :g1, :g2, :g3]
+        @eval $x = zeros($grpar.nx)
+    end
+    return Fluxes(f1, f2, f3, g1, g2, g3)
 end
 
 # Sod shock tube problem
-function sod()
-    half::Int = nx ÷ 2
-    for i = [:ρ, :u, :P]
-        @eval $i = zeros(nx)
-    end
-    ρ[1:half] .= 1; ρ[half+1:end] .= 0.125
-    P[1:half] .= 1; P[half+1:end] .= 0.1
-    return ρ, u, P
+function sod!(U, grpar)
+    half = grpar.nx ÷ 2
+    U.ρ[1:half] .= 1; U.ρ[half+1:end] .= 0.125
+    U.P[1:half] .= 1; U.P[half+1:end] .= 0.1
 end
 
 # Lax problem
-function lax()
-    half::Int = nx ÷ 2
-    for i = [:ρ, :u, :P]
-        @eval $i = zeros(nx)
-    end
-    ρ[1:half] .= 0.445; ρ[half+1:end] .= 0.5
-    u[1:half] .= 0.698
-    P[1:half] .= 3.528; P[half+1:end] .= 0.571
-    return ρ, u, P
+function lax!(U, grpar)
+    half = grpar.nx ÷ 2
+    U.ρ[1:half] .= 0.445; U.ρ[half+1:end] .= 0.5
+    U.u[1:half] .= 0.698
+    U.P[1:half] .= 3.528; U.P[half+1:end] .= 0.571
 end
 
 # Shu-Osher problem. Set grid to x = [-5, 5].
-function shu_osher()
-    half::Int = nx ÷ 10
-    for i = [:ρ, :u, :P]
-        @eval $i = zeros(nx)
-    end
-    @. ρ = 1.0 + 1/5 * sin(5x)
-    ρ[1:half] .= 27/7
-    u[1:half] .= 4*√(35)/9
-    P[1:half] .= 31/3; P[half+1:end] .= 1.0
-    return ρ, u, P
+function shu_osher!(U, grpar)
+    tenth = grpar.nx ÷ 10
+    @. U.ρ = 1.0 + 1/5 * sin(5 * grpar.x)
+    U.ρ[1:tenth] .= 27/7
+    U.u[1:tenth] .= 4/9 * sqrt(35)
+    U.P[1:tenth] .= 31/3; U.P[tenth+1:end] .= 1.0
 end
 
-# Returns dt and eval = a+c
+function primitive_to_conserved!(U, γ)
+    @. U.ρu = U.ρ * U.u
+    @. U.E  = U.P / (γ-1) + 1/2 * U.ρ * U.u^2
+end
+
+function conserved_to_primitive!(U, γ)
+    @. U.u = U.ρu / U.ρ
+    @. U.P = (γ-1) * (U.E - U.ρu^2 / 2ρ)
+end
+
+# function h(γ, ρ, u, P)
+#     return γ/(γ-1) * P / ρ + 1/2 * u^2
+# end
+
+# function roe_average(ρ, u, h, γ)
+#     denom = √(ρ[i]) + √(ρ[i+1])
+#     u_avg = (√(ρ[i]) * u[i] + √(ρ[i+1]) * u[i+1]) / denom
+#     h_avg = (√(ρ[i]) * h[i] + √(ρ[i+1]) * h[i+1]) / denom
+#     c_avg = √((γ-1.) * (h_avg - 1/2 * u_avg^2))
+#     return u_avg, h_avg, c_avg
+# end
+
+function max_eigval(U, γ)
+    a = maximum(abs.(U.u))
+    c = maximum(sqrt.(γ * U.P ./ U.ρ)) # sound speed
+    return a + c
+end
+
 # CFL condition needs to be addressed
-function timestep(ρ, u, P, cfl)
-    # global dx
-    a = maximum(abs.(u))
-    c = maximum(.√(γ * P ./ ρ)) # sound speed
-    eval = a + c
-    dt = 0.1 * cfl * dx / eval
-    return dt, eval
+CFL_condition(eigval, cfl, grpar) = 0.1 * cfl * grpar.dx / eigval
+
+function update_f_fluxes!(F, U)
+    @. F.f1 = U.ρu
+    @. F.f2 = U.ρu^2 / U.ρ + U.P
+    @. F.f3 = U.u * (U.E + U.P)
 end
 
-function euler(ρ, u, P, γ, cfl, t_max)
-    t = 0; counter = 0
-    rk = preallocate_rungekutta_parameters()
-    ρu, E = primitive_to_conserved(ρ, u, P, γ)
-    # op = zeros(nx)
+function euler(γ=7/5, cfl=0.7, t_max=0.14)
+    grpar = WenoChar.grid(128, -0.5, 0.5, 3)
+    rkpar = WenoChar.preallocate_rungekutta_parameters(grpar)
+    wepar = WenoChar.preallocate_weno_parameters(grpar)
+    U = preallocate_variables(grpar)
+    F = preallocate_fluxes(grpar)
+
+    sod!(U, grpar)
+    # lax!(U, grpar)
+    # shu_osher!(U, grpar)
+
+    primitive_to_conserved!(U, γ)
+    t = 0.0; counter = 0
 
     while t < t_max
-        dt, eval = timestep(ρ, u, P, cfl)
+        wepar.ev = max_eigval(U, γ)
+        dt = CFL_condition(wepar.ev, cfl, grpar)
         t += dt; counter += 1
-
-        # Component-wise reconstruction
-        # in the primitive variables
-        f1 = ρu
-        f2 = @. ρu^2 / ρ + P
-        f3 = @. u * (E + P)
-        ρ  .= Weno.runge_kutta(ρ,  f1, op, eval, dt)
-        ρu .= Weno.runge_kutta(ρu, f2, op, eval, dt)
-        E  .= Weno.runge_kutta(E,  f3, op, eval, dt)
-        u, P = conserved_to_primitive(ρ, ρu, E, γ)
-
         Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
+
+        # Component-wise reconstruction in the primitive variables
+        update_f_fluxes!(F, U)
+        WenoChar.runge_kutta!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
+        WenoChar.runge_kutta!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
+        WenoChar.runge_kutta!(U.E,  F.f3, dt, grpar, rkpar, wepar)
+        conserved_to_primitive!(U, γ)
     end
 
-    plt = Plots.plot(x[cr], [ρ[cr], u[cr], P[cr]], title="1D Euler Equations",
+
+
+    Printf.@printf("%d iterations. t_max = %2.3f.\n", counter, t)
+    x = grpar.x; cr = grpar.cr
+    plt = Plots.plot(x, [U.ρ, U.u, U.P], # [U.ρ[cr], U.u[cr], U.P[cr]],
+                     title="1D Euler Equations",
                      xaxis="x", label=["rho", "u", "P"])
     display(plt)
 end
 
-function main(γ=7/5)
-    gpar = Weno.grid(512, -0.5, 0.5, 3)
-
-    # ρ, u, P = sod()
-    # ρ, u, P = lax()
-    # ρ, u, P = shu_osher()
-
-    # euler(ρ, u, P, γ, 0.6, 0.13)
-end
-
-main()
+euler()

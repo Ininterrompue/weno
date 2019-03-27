@@ -69,15 +69,16 @@ end
 # 3rd order TVD Runge-Kutta discretizes
 #   du/dt = op(u, x)
 # where op is a (nonlinear) operator.
-function runge_kutta!(u, f, dt, grpar, rkpar, wspar)
+function runge_kutta!(u, f, dt, grpar, rkpar, wepar)
     for i in grpar.cr
-        wspar.fp[i] = fplus(u[i], f[i], wspar.ev)
-        wspar.fm[i] = fminus(u[i], f[i], wspar.ev)
+        wepar.fp[i] = fplus(u[i], f[i], wepar.ev)
+        wepar.fm[i] = fminus(u[i], f[i], wepar.ev)
     end
+
     for i in grpar.cr
-        @views wspar.fp_local = wspar.fp[i-3: i+3]
-        @views wspar.fm_local = wspar.fm[i-3: i+3]
-        rkpar.op[i] = weno_dv(grpar, wspar)
+        @views wepar.fp_local = wepar.fp[i-3: i+3]
+        @views wepar.fm_local = wepar.fm[i-3: i+3]
+        rkpar.op[i] = weno_dv(grpar, wepar)
     end
 
     @. rkpar.u1 = u + dt * rkpar.op
@@ -87,11 +88,12 @@ function runge_kutta!(u, f, dt, grpar, rkpar, wspar)
 end
 
 # 5th order WENO finite-difference scheme
-function weno_dv(grpar, wspar)
-    wspar.df = -1/grpar.dx *
-        (fhat("positive", "j+1/2", wspar) + fhat("negative", "j+1/2", wspar) -
-         fhat("positive", "j-1/2", wspar) - fhat("negative", "j-1/2", wspar))
-    return wspar.df
+function weno_dv(grpar, wepar)
+    wepar.df = -1/grpar.dx *
+        (fhat(:+, "j+1/2", wepar) + fhat(:-, "j+1/2", wepar) -
+         fhat(:+, "j-1/2", wepar) - fhat(:-, "j-1/2", wepar))
+
+    return wepar.df
 end
 
 function fhat(flux_sign, half_sign, w)
@@ -103,22 +105,23 @@ function fhat(flux_sign, half_sign, w)
         @views fm = w.fm_local[1:end-1]
     end
 
-    if flux_sign == "positive"
+    if flux_sign == :+
         w.fhat0 =  1/3 * fp[1] - 7/6 * fp[2] + 11/6 * fp[3]
         w.fhat1 = -1/6 * fp[2] + 5/6 * fp[3] +  1/3 * fp[4]
         w.fhat2 =  1/3 * fp[3] + 5/6 * fp[4] -  1/6 * fp[5]
-    elseif flux_sign == "negative"
+    elseif flux_sign == :-
         w.fhat0 =  1/3 * fm[4] + 5/6 * fm[3] -  1/6 * fm[2]
         w.fhat1 = -1/6 * fm[5] + 5/6 * fm[4] +  1/3 * fm[3]
         w.fhat2 =  1/3 * fm[6] - 7/6 * fm[5] + 11/6 * fm[4]
     end
 
     w.w0, w.w1, w.w2 = weights(flux_sign, fp, fm, w)
+    # @show flux_sign, half_sign, w.w0, w.w1, w.w2
     return w.w0 * w.fhat0 + w.w1 * w.fhat1 + w.w2 * w.fhat2
 end
 
 function weights(flux_sign, fp, fm, w)
-    if flux_sign == "positive"
+    if flux_sign == :+
         w.IS0 = 13/12 * (fp[1] - 2 * fp[2] + fp[3])^2 +
                   1/4 * (fp[1] - 4 * fp[2] + 3 * fp[3])^2
         w.IS1 = 13/12 * (fp[2] - 2 * fp[3] + fp[4])^2 +
@@ -133,11 +136,11 @@ function weights(flux_sign, fp, fm, w)
         w.α2 = 3/10 * (1 + (w.τ / (w.ϵ + w.IS2))^2)
 
         # Jiang and Shu, 1997
-        # α0 = 1/10 / (w.ϵ + w.IS0)^2
-        # α1 = 6/10 / (w.ϵ + w.IS1)^2
-        # α2 = 3/10 / (w.ϵ + w.IS2)^2
+        # w.α0 = 1/10 / (w.ϵ + w.IS0)^2
+        # w.α1 = 6/10 / (w.ϵ + w.IS1)^2
+        # w.α2 = 3/10 / (w.ϵ + w.IS2)^2
 
-    elseif flux_sign == "negative"
+    elseif flux_sign == :-
         w.IS0 = 13/12 * (fm[2] - 2 * fm[3] + fm[4])^2 +
                   1/4 * (fm[2] - 4 * fm[3] + 3 * fm[4])^2
         w.IS1 = 13/12 * (fm[3] - 2 * fm[4] + fm[5])^2 +
@@ -150,9 +153,9 @@ function weights(flux_sign, fp, fm, w)
         w.α1 = 6/10 * (1 + (w.τ / (w.ϵ + w.IS1))^2)
         w.α2 = 1/10 * (1 + (w.τ / (w.ϵ + w.IS2))^2)
 
-        # α0 = 3/10 / (w.ϵ + w.IS0)^2
-        # α1 = 6/10 / (w.ϵ + w.IS1)^2
-        # α2 = 1/10 / (w.ϵ + w.IS2)^2
+        # w.α0 = 3/10 / (w.ϵ + w.IS0)^2
+        # w.α1 = 6/10 / (w.ϵ + w.IS1)^2
+        # w.α2 = 1/10 / (w.ϵ + w.IS2)^2
     end
 
     w.w0 = w.α0 / (w.α0 + w.α1 + w.α2)

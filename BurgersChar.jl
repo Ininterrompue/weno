@@ -38,17 +38,18 @@ end
 function burgers(cfl=0.3, t_max=4.0)
     grpar = WenoChar.grid(512, -5.0, 5.0, 3)
     rkpar = WenoChar.preallocate_rungekutta_parameters(grpar)
-    wspar = WenoChar.preallocate_weno_parameters(grpar)
+    wepar = WenoChar.preallocate_weno_parameters(grpar)
     u, f = initialize_uf(grpar)
     dt = CFL_condition(grpar, cfl)
     t = 0.0; counter = 0
 
     while t < t_max
         t += dt; counter += 1
-        wspar.ev = maximum(u)
-        WenoChar.runge_kutta!(u, f, dt, grpar, rkpar, wspar)
+        Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
+        wepar.ev = maximum(u)
+        WenoChar.runge_kutta!(u, f, dt, grpar, rkpar, wepar)
         boundary_conditions!(u)
-        # Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
+
         update_flux!(f, u)
     end
 
@@ -59,4 +60,4 @@ function burgers(cfl=0.3, t_max=4.0)
 end
 
 # BenchmarkTools.@btime burgers();
-burgers()
+@time burgers()
