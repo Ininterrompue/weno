@@ -7,8 +7,8 @@
 # and   E = P/(γ-1) + 1/2 * ρu².
 # For a gas with 5 dofs, γ = 7/5.
 
-include("./WenoChar.jl")
-import .WenoChar
+include("./Weno.jl")
+import .Weno
 import Printf, BenchmarkTools
 import Plots
 
@@ -136,17 +136,17 @@ function update_jacobian!(U, U_avg, U_proj, γ)
     end
 end
 
-function euler(γ=7/5, cfl=0.4, t_max=0.13)
-    grpar = WenoChar.grid(256, -0.5, 0.5, 3)
-    rkpar = WenoChar.preallocate_rungekutta_parameters(grpar)
-    wepar = WenoChar.preallocate_weno_parameters(grpar)
+function euler(γ=7/5, cfl=0.4, t_max=1.0)
+    grpar = Weno.grid(1024, -5.0, 5.0, 3)
+    rkpar = Weno.preallocate_rungekutta_parameters(grpar)
+    wepar = Weno.preallocate_weno_parameters(grpar)
     U, V = preallocate_variables(grpar)
     U_avg = preallocate_averaged_variables(grpar)
     F, G = preallocate_fluxes(grpar)
 
-    sod!(U, grpar)
+    # sod!(U, grpar)
     # lax!(U, grpar)
-    # shu_osher!(U, grpar)
+    shu_osher!(U, grpar)
 
     primitive_to_conserved!(U, γ)
     t = 0.0; counter = 0
@@ -159,14 +159,14 @@ function euler(γ=7/5, cfl=0.4, t_max=0.13)
 
         # Component-wise reconstruction
         update_fluxes!(F, U)
-        WenoChar.runge_kutta!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
-        WenoChar.runge_kutta!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
-        WenoChar.runge_kutta!(U.E,  F.f3, dt, grpar, rkpar, wepar)
+        Weno.runge_kutta!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
+        Weno.runge_kutta!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
+        Weno.runge_kutta!(U.E,  F.f3, dt, grpar, rkpar, wepar)
         conserved_to_primitive!(U, γ)
 
         # Characteristic-wise reconstruction
         # 1. Define the Jacobian in this file.
-        update_jacobian!(U, V, γ, grpar)
+        # update_jacobian!(U, V, γ, grpar)
         # 2. Define the functions to convert to and from characteristic space
         #    in WenoChar.jl.
         # 3. Convert to char space in this file and call runge_kutta!()

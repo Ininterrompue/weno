@@ -3,8 +3,8 @@
 #   with periodic boundary conditions.
 # By default, f = 1/2 * u^2.
 
-include("./WenoChar.jl")
-import .WenoChar
+include("./Weno.jl")
+import .Weno
 import Printf, BenchmarkTools
 import Plots
 
@@ -36,9 +36,9 @@ function boundary_conditions!(u)
 end
 
 function burgers(cfl=0.3, t_max=1.0)
-    grpar = WenoChar.grid(256, -5.0, 5.0, 3)
-    rkpar = WenoChar.preallocate_rungekutta_parameters(grpar)
-    wepar = WenoChar.preallocate_weno_parameters(grpar)
+    grpar = Weno.grid(256, -5.0, 5.0, 3)
+    rkpar = Weno.preallocate_rungekutta_parameters(grpar)
+    wepar = Weno.preallocate_weno_parameters(grpar)
     u, f = initialize_uf(grpar)
     dt = CFL_condition(grpar, cfl)
     t = 0.0; counter = 0
@@ -47,7 +47,7 @@ function burgers(cfl=0.3, t_max=1.0)
         t += dt; counter += 1
         # Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
         wepar.ev = maximum(u)
-        WenoChar.runge_kutta!(u, f, dt, grpar, rkpar, wepar)
+        Weno.runge_kutta!(u, f, dt, grpar, rkpar, wepar)
         boundary_conditions!(u)
 
         update_flux!(f, u)
