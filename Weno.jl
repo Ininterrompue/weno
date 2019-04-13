@@ -19,6 +19,7 @@ end
 # where op is a (nonlinear) operator.
 function runge_kutta(u, f, op, λ, dt)
     @views op[cr] = weno_dv(u, f, λ)
+    # @show op
     u1 = @. u + dt * op
     u2 = @. 3/4 * u + 1/4 * u1 + 1/4 * dt * op
     u3 = @. 1/3 * u + 2/3 * u2 + 2/3 * dt * op
@@ -30,6 +31,7 @@ function weno_dv(u, f, λ)
     fp = fplus(u, f, λ); fm = fminus(u, f, λ)
     ∂f = -1/dx * (fhat(+1, +0, fp, fm) + fhat(-1, +0, fp, fm) -
                   fhat(+1, -1, fp, fm) - fhat(-1, -1, fp, fm))
+
     return ∂f
 end
 

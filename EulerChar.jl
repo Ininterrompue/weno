@@ -9,7 +9,7 @@
 
 include("./WenoChar.jl")
 import .WenoChar
-import Printf
+import Printf, BenchmarkTools
 import Plots
 
 
@@ -21,28 +21,48 @@ struct Variables{T}
     E::Vector{T}    # energy
 end
 
-struct Fluxes{T}
-    f1::Vector{T}   # real space
-    f2::Vector{T}
-    f3::Vector{T}
-    g1::Vector{T}   # characteristic space
-    g2::Vector{T}
-    g3::Vector{T}
+struct AveragedVariables{T}
+    ρ::Vector{T}
+    u::Vector{T}
+    P::Vector{T}
+    cr::UnitRange{Int}
+    J::Array{T, 3}
 end
 
+struct ProjectedVariables{T}
+    ρ::Vector{T}
+    ρu::Vector{T}
+    E::Vector{T}
+end
+
+struct Fluxes{T}
+    f1::Vector{T}
+    f2::Vector{T}
+    f3::Vector{T}
+end
 
 function preallocate_variables(grpar)
-    for x in [:ρ, :u, :P, :ρu, :E]
+    for x in [:ρ, :u, :P, :ρu, :E, :ρ2, :ρu2, :E2]
         @eval $x = zeros($grpar.nx)
     end
-    return Variables(ρ, u, P, ρu, E)
+
+    return Variables(ρ, u, P, ρu, E), ProjectedVariables(ρ2, ρu2, E2)
+end
+
+function preallocate_averaged_variables(grpar)
+    cr = range(grpar.cr[1]-1, stop=grpar.cr[end])
+    for x in [:ρ, :u, :P]
+        @eval $x = zeros($grpar.nx+1)
+    end
+    J = zeros(3, 3, grpar.nx+1)
+    return AveragedVariables(ρ, u, P, cr, J)
 end
 
 function preallocate_fluxes(grpar)
-    for x in [:f1, :f2, :f3, :g1, :g2, :g3]
+    for x in [:f1, :f2, :f3]
         @eval $x = zeros($grpar.nx)
     end
-    return Fluxes(f1, f2, f3, g1, g2, g3)
+    return Fluxes(f1, f2, f3), Fluxes(f1, f2, f3)
 end
 
 # Sod shock tube problem
@@ -76,42 +96,53 @@ end
 
 function conserved_to_primitive!(U, γ)
     @. U.u = U.ρu / U.ρ
-    @. U.P = (γ-1) * (U.E - U.ρu^2 / 2ρ)
+    @. U.P = (γ-1) * (U.E - U.ρu^2 / 2U.ρ)
 end
 
-# function h(γ, ρ, u, P)
-#     return γ/(γ-1) * P / ρ + 1/2 * u^2
-# end
-
-# function roe_average(ρ, u, h, γ)
-#     denom = √(ρ[i]) + √(ρ[i+1])
-#     u_avg = (√(ρ[i]) * u[i] + √(ρ[i+1]) * u[i+1]) / denom
-#     h_avg = (√(ρ[i]) * h[i] + √(ρ[i+1]) * h[i+1]) / denom
-#     c_avg = √((γ-1.) * (h_avg - 1/2 * u_avg^2))
-#     return u_avg, h_avg, c_avg
-# end
-
-function max_eigval(U, γ)
-    a = maximum(abs.(U.u))
-    c = maximum(sqrt.(γ * U.P ./ U.ρ)) # sound speed
-    return a + c
+function arithmetic_average!(U, U_avg)
+    for i in U_avg.cr
+        U_avg.ρ[i] = 1/2 * (U.ρ[i] + U.ρ[i+1])
+        U_avg.u[i] = 1/2 * (U.u[i] + U.u[i+1])
+        U_avg.P[i] = 1/2 * (U.P[i] + U.P[i+1])
+    end
 end
 
-# CFL condition needs to be addressed
+sound_speed(P, ρ, γ) = sqrt(γ*P/ρ)
+max_eigval(U, γ) = maximum(abs.(U.u) + sqrt.(γ * U.P ./ U.ρ))
 CFL_condition(eigval, cfl, grpar) = 0.1 * cfl * grpar.dx / eigval
 
-function update_f_fluxes!(F, U)
+function update_fluxes!(F, U)
     @. F.f1 = U.ρu
     @. F.f2 = U.ρu^2 / U.ρ + U.P
     @. F.f3 = U.u * (U.E + U.P)
 end
 
-function euler(γ=7/5, cfl=0.7, t_max=0.14)
-    grpar = WenoChar.grid(128, -0.5, 0.5, 3)
+# J has dimensions (3, 3, nx+1).
+# It is defined starting from the leftmost j-1/2.
+function update_jacobian!(U, U_avg, U_proj, γ)
+    arithmetic_average!(U, U_avg)
+
+    for i in U_avg.cr
+
+        U_avg.J[2, 1, i] = -(3-γ)/2 * U_avg.u[i]^2
+        U_avg.J[3, 1, i] = (γ-2)/2 * U_avg.u[i]^3 - (U_avg.u[i] *
+                           sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1))
+        U_avg.J[1, 2, i] = 1
+        U_avg.J[2, 2, i] = (3-γ) * U_avg.u[i]
+        U_avg.J[3, 2, i] = sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1) +
+                           (3-2γ)/2 * U_avg.u[i]^2
+        U_avg.J[2, 3, i] = γ-1
+        U_avg.J[3, 3, i] = γ * U_avg.u[i]
+    end
+end
+
+function euler(γ=7/5, cfl=0.4, t_max=0.13)
+    grpar = WenoChar.grid(256, -0.5, 0.5, 3)
     rkpar = WenoChar.preallocate_rungekutta_parameters(grpar)
     wepar = WenoChar.preallocate_weno_parameters(grpar)
-    U = preallocate_variables(grpar)
-    F = preallocate_fluxes(grpar)
+    U, V = preallocate_variables(grpar)
+    U_avg = preallocate_averaged_variables(grpar)
+    F, G = preallocate_fluxes(grpar)
 
     sod!(U, grpar)
     # lax!(U, grpar)
@@ -124,24 +155,32 @@ function euler(γ=7/5, cfl=0.7, t_max=0.14)
         wepar.ev = max_eigval(U, γ)
         dt = CFL_condition(wepar.ev, cfl, grpar)
         t += dt; counter += 1
-        Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
+        # Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
 
-        # Component-wise reconstruction in the primitive variables
-        update_f_fluxes!(F, U)
+        # Component-wise reconstruction
+        update_fluxes!(F, U)
         WenoChar.runge_kutta!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
         WenoChar.runge_kutta!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
         WenoChar.runge_kutta!(U.E,  F.f3, dt, grpar, rkpar, wepar)
         conserved_to_primitive!(U, γ)
+
+        # Characteristic-wise reconstruction
+        # 1. Define the Jacobian in this file.
+        update_jacobian!(U, V, γ, grpar)
+        # 2. Define the functions to convert to and from characteristic space
+        #    in WenoChar.jl.
+        # 3. Convert to char space in this file and call runge_kutta!()
+        #    on V and G.
+        # 4. Convert back to real space.
     end
-
-
 
     Printf.@printf("%d iterations. t_max = %2.3f.\n", counter, t)
     x = grpar.x; cr = grpar.cr
-    plt = Plots.plot(x, [U.ρ, U.u, U.P], # [U.ρ[cr], U.u[cr], U.P[cr]],
+    plt = Plots.plot(x, [U.ρ, U.u, U.P],
                      title="1D Euler Equations",
                      xaxis="x", label=["rho", "u", "P"])
     display(plt)
 end
 
-euler()
+# BenchmarkTools.@btime euler();
+@time euler();

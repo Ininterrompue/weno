@@ -36,8 +36,8 @@ function burgers(u, cfl::Float64, t_max::Float64)
 
 end
 
-nx, dx, x, cr = Weno.grid(256, -5.0, 5.0, 3)
+nx, dx, x, cr = Weno.grid(32, -5.0, 5.0, 3)
 u = @. exp(-x^2)
 # u = sech.(x)
 
-@btime burgers(u, 0.3, 1.0);
+burgers(u, 0.3, 0.01);

@@ -3,6 +3,8 @@ module WenoChar
 export grid, runge_kutta
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 
+using LinearAlgebra
+
 struct GridParameters
     nx::Int
     dx::Float64
@@ -23,6 +25,8 @@ mutable struct WenoParameters{T}
     fm::Vector{T}
     fp_local::Vector{T}
     fm_local::Vector{T}
+    fp_local2::Vector{T}
+    fm_local2::Vector{T}
     ev::T
     df::T
     fhat0::T
@@ -62,22 +66,29 @@ function preallocate_weno_parameters(grpar)
     fm = zeros(grpar.nx)
     fp_local = zeros(2grpar.ghost+1)
     fm_local = zeros(2grpar.ghost+1)
-    return WenoParameters(fp, fm, fp_local, fm_local, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
+    fp_local2 = zeros(2grpar.ghost)
+    fm_local2 = zeros(2grpar.ghost)
+    return WenoParameters(fp, fm, fp_local, fm_local, fp_local2, fm_local2,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
+end
+
+function characteristic_fields(J)
+
 end
 
 # 3rd order TVD Runge-Kutta discretizes
 #   du/dt = op(u, x)
 # where op is a (nonlinear) operator.
 function runge_kutta!(u, f, dt, grpar, rkpar, wepar)
-    for i in grpar.cr
-        wepar.fp[i] = fplus(u[i], f[i], wepar.ev)
-        wepar.fm[i] = fminus(u[i], f[i], wepar.ev)
-    end
+    @. wepar.fp = fplus(u, f, wepar.ev)
+    @. wepar.fm = fminus(u, f, wepar.ev)
 
     for i in grpar.cr
-        @views wepar.fp_local = wepar.fp[i-3: i+3]
-        @views wepar.fm_local = wepar.fm[i-3: i+3]
+        for j in 1:7
+            wepar.fp_local[j] = wepar.fp[i-3+j-1]
+            wepar.fm_local[j] = wepar.fm[i-3+j-1]
+        end
         rkpar.op[i] = weno_dv(grpar, wepar)
     end
 
@@ -92,18 +103,24 @@ function weno_dv(grpar, wepar)
     wepar.df = -1/grpar.dx *
         (fhat(:+, "j+1/2", wepar) + fhat(:-, "j+1/2", wepar) -
          fhat(:+, "j-1/2", wepar) - fhat(:-, "j-1/2", wepar))
-
     return wepar.df
 end
 
 function fhat(flux_sign, half_sign, w)
     if half_sign == "j+1/2"
-        @views fp = w.fp_local[2:end]
-        @views fm = w.fm_local[2:end]
+        for i in 1:6
+            w.fp_local2[i] = w.fp_local[i+1]
+            w.fm_local2[i] = w.fm_local[i+1]
+        end
     elseif half_sign == "j-1/2"
-        @views fp = w.fp_local[1:end-1]
-        @views fm = w.fm_local[1:end-1]
+        for i in 1:6
+            w.fp_local2[i] = w.fp_local[i]
+            w.fm_local2[i] = w.fm_local[i]
+        end
     end
+
+    fp = w.fp_local2
+    fm = w.fm_local2
 
     if flux_sign == :+
         w.fhat0 =  1/3 * fp[1] - 7/6 * fp[2] + 11/6 * fp[3]
@@ -115,12 +132,11 @@ function fhat(flux_sign, half_sign, w)
         w.fhat2 =  1/3 * fm[6] - 7/6 * fm[5] + 11/6 * fm[4]
     end
 
-    w.w0, w.w1, w.w2 = weights(flux_sign, fp, fm, w)
-    # @show flux_sign, half_sign, w.w0, w.w1, w.w2
+    weights!(flux_sign, fp, fm, w)
     return w.w0 * w.fhat0 + w.w1 * w.fhat1 + w.w2 * w.fhat2
 end
 
-function weights(flux_sign, fp, fm, w)
+function weights!(flux_sign, fp, fm, w)
     if flux_sign == :+
         w.IS0 = 13/12 * (fp[1] - 2 * fp[2] + fp[3])^2 +
                   1/4 * (fp[1] - 4 * fp[2] + 3 * fp[3])^2
@@ -161,8 +177,6 @@ function weights(flux_sign, fp, fm, w)
     w.w0 = w.α0 / (w.α0 + w.α1 + w.α2)
     w.w1 = w.α1 / (w.α0 + w.α1 + w.α2)
     w.w2 = w.α2 / (w.α0 + w.α1 + w.α2)
-
-    return w.w0, w.w1, w.w2
 end
 
 # Lax-Friderichs flux splitting

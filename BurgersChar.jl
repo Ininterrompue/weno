@@ -35,8 +35,8 @@ function boundary_conditions!(u)
     u[1] = u[end-5]
 end
 
-function burgers(cfl=0.3, t_max=4.0)
-    grpar = WenoChar.grid(512, -5.0, 5.0, 3)
+function burgers(cfl=0.3, t_max=1.0)
+    grpar = WenoChar.grid(256, -5.0, 5.0, 3)
     rkpar = WenoChar.preallocate_rungekutta_parameters(grpar)
     wepar = WenoChar.preallocate_weno_parameters(grpar)
     u, f = initialize_uf(grpar)
@@ -45,7 +45,7 @@ function burgers(cfl=0.3, t_max=4.0)
 
     while t < t_max
         t += dt; counter += 1
-        Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
+        # Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
         wepar.ev = maximum(u)
         WenoChar.runge_kutta!(u, f, dt, grpar, rkpar, wepar)
         boundary_conditions!(u)
@@ -53,11 +53,11 @@ function burgers(cfl=0.3, t_max=4.0)
         update_flux!(f, u)
     end
 
-    Printf.@printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    x = grpar.x; cr = grpar.cr
-    plt = Plots.plot(x[cr], u[cr], title="Burgers' Equation", label="u(x, $t)")
-    display(plt)
+    # Printf.@printf("%d iterations. t_max = %2.3f.\n", counter, t)
+    # x = grpar.x; cr = grpar.cr
+    # plt = Plots.plot(x[cr], u[cr], title="Burgers' Equation")
+    # display(plt)
 end
 
-# BenchmarkTools.@btime burgers();
-@time burgers()
+BenchmarkTools.@btime burgers();
+# @time burgers()
