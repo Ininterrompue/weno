@@ -1,6 +1,6 @@
 module Weno
 
-export grid, runge_kutta
+export grid, time_evolution!, diagonalize_jacobian!
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 
 using LinearAlgebra
@@ -46,7 +46,7 @@ mutable struct WenoParameters{T}
 end
 
 
-function grid(size=32, min=-1.0, max=1.0, ghost=3)
+function grid(; size=32, min=-1.0, max=1.0, ghost=3)
     nx = 2*ghost + size
     dx = (max-min)/size
     x  = min - (ghost - 1/2)*dx : dx : max + (ghost - 1/2)*dx
@@ -73,14 +73,15 @@ function preallocate_weno_parameters(grpar)
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
 end
 
-function characteristic_fields(J)
-
+function diagonalize_jacobian!(U_avg)
+    for i in U_avg.cr
+        U_avg.evalRe[:, i], U_avg.evalIm[:, i], 
+        U_avg.evecL[:, :, i], U_avg.evecR[:, :, i] =
+            LAPACK.geev!('V', 'V', U_avg.J[:, :, i])
+    end
 end
 
-# 3rd order TVD Runge-Kutta discretizes
-#   du/dt = op(u, x)
-# where op is a (nonlinear) operator.
-function runge_kutta!(u, f, dt, grpar, rkpar, wepar)
+function time_evolution!(u, f, dt, grpar, rkpar, wepar)
     @. wepar.fp = fplus(u, f, wepar.ev)
     @. wepar.fm = fminus(u, f, wepar.ev)
 
@@ -89,9 +90,12 @@ function runge_kutta!(u, f, dt, grpar, rkpar, wepar)
             wepar.fp_local[j] = wepar.fp[i-3+j-1]
             wepar.fm_local[j] = wepar.fm[i-3+j-1]
         end
-        rkpar.op[i] = weno_dv(grpar, wepar)
+        rkpar.op[i] = weno_scheme(grpar, wepar)
+        runge_kutta!(u, dt, rkpar)
     end
+end
 
+function runge_kutta!(u, dt, rkpar)
     @. rkpar.u1 = u + dt * rkpar.op
     @. rkpar.u2 = 3/4 * u + 1/4 * rkpar.u1 + 1/4 * dt * rkpar.op
     @. rkpar.u3 = 1/3 * u + 2/3 * rkpar.u2 + 2/3 * dt * rkpar.op
@@ -99,7 +103,7 @@ function runge_kutta!(u, f, dt, grpar, rkpar, wepar)
 end
 
 # 5th order WENO finite-difference scheme
-function weno_dv(grpar, wepar)
+function weno_scheme(grpar, wepar)
     wepar.df = -1/grpar.dx *
         (fhat(:+, "j+1/2", wepar) + fhat(:-, "j+1/2", wepar) -
          fhat(:+, "j-1/2", wepar) - fhat(:-, "j-1/2", wepar))
@@ -132,11 +136,11 @@ function fhat(flux_sign, half_sign, w)
         w.fhat2 =  1/3 * fm[6] - 7/6 * fm[5] + 11/6 * fm[4]
     end
 
-    weights!(flux_sign, fp, fm, w)
+    nonlinear_weights!(flux_sign, fp, fm, w)
     return w.w0 * w.fhat0 + w.w1 * w.fhat1 + w.w2 * w.fhat2
 end
 
-function weights!(flux_sign, fp, fm, w)
+function nonlinear_weights!(flux_sign, fp, fm, w)
     if flux_sign == :+
         w.IS0 = 13/12 * (fp[1] - 2 * fp[2] + fp[3])^2 +
                   1/4 * (fp[1] - 4 * fp[2] + 3 * fp[3])^2

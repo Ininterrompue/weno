@@ -1,7 +1,5 @@
 # Solves the 1D Euler equations
-#
 #   ∂U/∂t + ∂F/∂x = 0
-#
 # where U = [ρ, ρu, E],
 #       F = [ρu, ρu² + P, u(E + P)]
 # and   E = P/(γ-1) + 1/2 * ρu².
@@ -9,7 +7,7 @@
 
 include("./Weno.jl")
 import .Weno
-import Printf, BenchmarkTools
+using Printf
 import Plots
 
 
@@ -27,6 +25,10 @@ struct AveragedVariables{T}
     P::Vector{T}
     cr::UnitRange{Int}
     J::Array{T, 3}
+    evalRe::Matrix{T}
+    evalIm::Matrix{T}
+    evecL::Array{T, 3}
+    evecR::Array{T, 3}
 end
 
 struct ProjectedVariables{T}
@@ -108,7 +110,7 @@ function arithmetic_average!(U, U_avg)
 end
 
 sound_speed(P, ρ, γ) = sqrt(γ*P/ρ)
-max_eigval(U, γ) = maximum(abs.(U.u) + sqrt.(γ * U.P ./ U.ρ))
+max_eigval(U, γ) = @. $maximum(abs(U.u) + sqrt(γ * U.P / U.ρ))
 CFL_condition(eigval, cfl, grpar) = 0.1 * cfl * grpar.dx / eigval
 
 function update_fluxes!(F, U)
@@ -117,13 +119,14 @@ function update_fluxes!(F, U)
     @. F.f3 = U.u * (U.E + U.P)
 end
 
-# J has dimensions (3, 3, nx+1).
-# It is defined starting from the leftmost j-1/2.
-function update_jacobian!(U, U_avg, U_proj, γ)
+"""
+J has dimensions (3, 3, nx+1).
+It is defined starting from the leftmost j-1/2.
+"""
+function update_jacobian!(U, U_avg, γ)
     arithmetic_average!(U, U_avg)
 
     for i in U_avg.cr
-
         U_avg.J[2, 1, i] = -(3-γ)/2 * U_avg.u[i]^2
         U_avg.J[3, 1, i] = (γ-2)/2 * U_avg.u[i]^3 - (U_avg.u[i] *
                            sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1))
@@ -136,8 +139,12 @@ function update_jacobian!(U, U_avg, U_proj, γ)
     end
 end
 
-function euler(γ=7/5, cfl=0.4, t_max=1.0)
-    grpar = Weno.grid(1024, -5.0, 5.0, 3)
+function project_to_characteristic_fields!(U_avg, V, G)
+
+end
+
+function euler(; γ=7/5, cfl=0.4, t_max=1.0)
+    grpar = Weno.grid(size=512, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
     wepar = Weno.preallocate_weno_parameters(grpar)
     U, V = preallocate_variables(grpar)
@@ -155,26 +162,26 @@ function euler(γ=7/5, cfl=0.4, t_max=1.0)
         wepar.ev = max_eigval(U, γ)
         dt = CFL_condition(wepar.ev, cfl, grpar)
         t += dt; counter += 1
-        # Printf.@printf("Iteration %d: t = %2.3f\n", counter, t)
+        # @printf("Iteration %d: t = %2.3f\n", counter, t)
 
         # Component-wise reconstruction
         update_fluxes!(F, U)
-        Weno.runge_kutta!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
-        Weno.runge_kutta!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
-        Weno.runge_kutta!(U.E,  F.f3, dt, grpar, rkpar, wepar)
+        Weno.time_evolution!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
+        Weno.time_evolution!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
+        Weno.time_evolution!(U.E,  F.f3, dt, grpar, rkpar, wepar)
         conserved_to_primitive!(U, γ)
 
         # Characteristic-wise reconstruction
-        # 1. Define the Jacobian in this file.
-        # update_jacobian!(U, V, γ, grpar)
-        # 2. Define the functions to convert to and from characteristic space
-        #    in WenoChar.jl.
-        # 3. Convert to char space in this file and call runge_kutta!()
-        #    on V and G.
+        # 1. Update the Jacobian in this file.
+        update_jacobian!(U, U_avg, γ)
+        # 2. Define the functions to convert to and from characteristic space in Weno.jl.
+        Weno.diagonalize_jacobian!(U_avg)
+        # 3. Convert to char space in this file and call time_evolution on V and G.
+        project_to_characteristic_fields!(U_avg, V, G)
         # 4. Convert back to real space.
     end
 
-    Printf.@printf("%d iterations. t_max = %2.3f.\n", counter, t)
+    @printf("%d iterations. t_max = %2.3f.\n", counter, t)
     x = grpar.x; cr = grpar.cr
     plt = Plots.plot(x, [U.ρ, U.u, U.P],
                      title="1D Euler Equations",
@@ -182,5 +189,4 @@ function euler(γ=7/5, cfl=0.4, t_max=1.0)
     display(plt)
 end
 
-# BenchmarkTools.@btime euler();
-@time euler();
+@time euler()
