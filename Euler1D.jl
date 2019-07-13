@@ -52,12 +52,18 @@ function preallocate_variables(grpar)
 end
 
 function preallocate_averaged_variables(grpar)
+    nx = grpar.nx
     cr = range(grpar.cr[1]-1, stop=grpar.cr[end])
     for x in [:ρ, :u, :P]
-        @eval $x = zeros($grpar.nx+1)
+        @eval $x = zeros($nx+1)
     end
-    J = zeros(3, 3, grpar.nx+1)
-    return AveragedVariables(ρ, u, P, cr, J)
+    J = zeros(3, 3, nx+1)
+    evalRe = zeros(3, nx+1)
+    evalIm = zeros(3, nx+1)
+    evecL = zeros(3, 3, nx+1)
+    evecR = zeros(3, 3, nx+1)
+
+    return AveragedVariables(ρ, u, P, cr, J, evalRe, evalIm, evecL, evecR)
 end
 
 function preallocate_fluxes(grpar)
@@ -110,7 +116,9 @@ function arithmetic_average!(U, U_avg)
 end
 
 sound_speed(P, ρ, γ) = sqrt(γ*P/ρ)
+
 max_eigval(U, γ) = @. $maximum(abs(U.u) + sqrt(γ * U.P / U.ρ))
+
 CFL_condition(eigval, cfl, grpar) = 0.1 * cfl * grpar.dx / eigval
 
 function update_fluxes!(F, U)
@@ -143,6 +151,14 @@ function project_to_characteristic_fields!(U_avg, V, G)
 
 end
 
+function plot_system(U, grpar)
+    x = grpar.x; cr = grpar.cr
+    plt = Plots.plot(x, U.ρ, title="1D Euler Equations", label="rho")
+    Plots.plot!(x, U.u, label="u")
+    Plots.plot!(x, U.P, label="P")
+    display(plt)
+end
+
 function euler(; γ=7/5, cfl=0.4, t_max=1.0)
     grpar = Weno.grid(size=512, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
@@ -169,24 +185,21 @@ function euler(; γ=7/5, cfl=0.4, t_max=1.0)
         Weno.time_evolution!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
         Weno.time_evolution!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
         Weno.time_evolution!(U.E,  F.f3, dt, grpar, rkpar, wepar)
-        conserved_to_primitive!(U, γ)
 
         # Characteristic-wise reconstruction
         # 1. Update the Jacobian in this file.
-        update_jacobian!(U, U_avg, γ)
+        # update_jacobian!(U, U_avg, γ)
         # 2. Define the functions to convert to and from characteristic space in Weno.jl.
-        Weno.diagonalize_jacobian!(U_avg)
+        # Weno.diagonalize_jacobian!(U_avg)
         # 3. Convert to char space in this file and call time_evolution on V and G.
-        project_to_characteristic_fields!(U_avg, V, G)
+        # project_to_characteristic_fields!(U_avg, V, G)
         # 4. Convert back to real space.
+
+        conserved_to_primitive!(U, γ)
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    x = grpar.x; cr = grpar.cr
-    plt = Plots.plot(x, [U.ρ, U.u, U.P],
-                     title="1D Euler Equations",
-                     xaxis="x", label=["rho", "u", "P"])
-    display(plt)
+    plot_system(U, grpar)
 end
 
 @time euler()

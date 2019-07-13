@@ -27,6 +27,12 @@ function boundary_conditions!(u)
     u[1] = u[end-5]
 end
 
+function plot_system(u, grpar)
+    x = grpar.x; cr = grpar.cr
+    plt = Plots.plot(x[cr], u[cr], title="1D Burgers' Equation", legend=false)
+    display(plt)
+end
+
 function burgers(; cfl=0.3, t_max=1.0)
     grpar = Weno.grid(size=256, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
@@ -44,9 +50,7 @@ function burgers(; cfl=0.3, t_max=1.0)
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    x = grpar.x; cr = grpar.cr
-    plt = Plots.plot(x[cr], u[cr], title="1D Burgers' Equation", legend=false)
-    display(plt)
+    plot_system(u, grpar)
 end
 
 @time burgers(t_max=4.0)

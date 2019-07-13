@@ -55,9 +55,8 @@ function grid(; size=32, min=-1.0, max=1.0, ghost=3)
 end
 
 function preallocate_rungekutta_parameters(grpar)
-    nx = grpar.nx
-    op = zeros(nx); u1 = zeros(nx)
-    u2 = zeros(nx); u3 = zeros(nx)
+    op = zeros(grpar.nx); u1 = zeros(grpar.nx)
+    u2 = zeros(grpar.nx); u3 = zeros(grpar.nx)
     return RungeKuttaParameters(op, u1, u2, u3)
 end
 
@@ -81,6 +80,10 @@ function diagonalize_jacobian!(U_avg)
     end
 end
 
+# Lax-Friderichs flux splitting
+fplus(u, f, ev)  = 1/2 * (f + ev * u)
+fminus(u, f, ev) = 1/2 * (f - ev * u)
+
 function time_evolution!(u, f, dt, grpar, rkpar, wepar)
     @. wepar.fp = fplus(u, f, wepar.ev)
     @. wepar.fm = fminus(u, f, wepar.ev)
@@ -91,8 +94,8 @@ function time_evolution!(u, f, dt, grpar, rkpar, wepar)
             wepar.fm_local[j] = wepar.fm[i-3+j-1]
         end
         rkpar.op[i] = weno_scheme(grpar, wepar)
-        runge_kutta!(u, dt, rkpar)
     end
+    runge_kutta!(u, dt, rkpar)
 end
 
 function runge_kutta!(u, dt, rkpar)
@@ -182,9 +185,5 @@ function nonlinear_weights!(flux_sign, fp, fm, w)
     w.w1 = w.α1 / (w.α0 + w.α1 + w.α2)
     w.w2 = w.α2 / (w.α0 + w.α1 + w.α2)
 end
-
-# Lax-Friderichs flux splitting
-fplus(u, f, ev)  = 1/2 * (f + ev * u)
-fminus(u, f, ev) = 1/2 * (f - ev * u)
 
 end
