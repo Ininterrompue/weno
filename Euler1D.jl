@@ -77,14 +77,20 @@ function preallocate_fluxes(grpar)
            Fluxes(h1, h2, h3), Fluxes(j1, j2, j3)
 end
 
-# Sod shock tube problem
+"""
+Sod shock tube problem
+x = [-0.5, 0.5], t_max = 0.14
+"""
 function sod!(U, grpar)
     half = grpar.nx ÷ 2
     U.ρ[1:half] .= 1; U.ρ[half+1:end] .= 0.125
     U.P[1:half] .= 1; U.P[half+1:end] .= 0.1
 end
 
-# Lax problem
+"""
+Lax problem
+x = [-0.5, 0.5], t_max = 0.13
+"""
 function lax!(U, grpar)
     half = grpar.nx ÷ 2
     U.ρ[1:half] .= 0.445; U.ρ[half+1:end] .= 0.5
@@ -92,7 +98,10 @@ function lax!(U, grpar)
     U.P[1:half] .= 3.528; U.P[half+1:end] .= 0.571
 end
 
-# Shu-Osher problem. Set grid to x = [-5, 5].
+"""
+Shu-Osher problem
+x = [-5, 5], t_max = 1.8
+"""
 function shu_osher!(U, grpar)
     tenth = grpar.nx ÷ 10
     @. U.ρ = 1.0 + 1/5 * sin(5 * grpar.x)
@@ -168,41 +177,37 @@ function project_to_realspace!(i, U_avg, F_hat, G_hat)
     F_hat.f3[i] = U_avg.evecR[3, 1] * G_hat.f1[i] + U_avg.evecR[3, 2] * G_hat.f2[i] + U_avg.evecR[3, 3] * G_hat.f3[i]
 end
 
-function plot_system(U, grpar)
+function plot_system(U, grpar, filename)
     x = grpar.x; cr = grpar.cr_mesh
-    plt = Plots.plot(x, U.ρ, title="1D Euler Equations", label="rho")
+    plt = Plots.plot(x, U.ρ, title="1D Euler equations", label="rho")
     Plots.plot!(x, U.u, label="u")
     Plots.plot!(x, U.P, label="P")
     display(plt)
+    # Plots.png(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.4, t_max=1.0)
-    grpar = Weno.grid(size=512, min=-5.0, max=5.0)
+    grpar = Weno.grid(size=256, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
     wepar = Weno.preallocate_weno_parameters(grpar)
     U, V = preallocate_variables(grpar)
     U_avg = preallocate_averaged_variables(grpar)
     F, G, F_hat, G_hat = preallocate_fluxes(grpar)
 
-    sod!(U, grpar)
+    # sod!(U, grpar)
     # lax!(U, grpar)
-    # shu_osher!(U, grpar)
+    shu_osher!(U, grpar)
 
     primitive_to_conserved!(U, γ)
     t = 0.0; counter = 0
 
-    # for q in 1:1
     while t < t_max
-        counter += 1
-        if counter % 100 == 0
-            @printf("Iteration %d: t = %2.3f\n", counter, t)
-        end
         update_fluxes!(F, U)
+        wepar.ev = max_eigval(U, γ)
+        dt = CFL_condition(wepar.ev, cfl, grpar)
+        t += dt 
         
         # Component-wise reconstruction
-        wepar.ev = max_eigval(U, γ)
-        # dt = CFL_condition(wepar.ev, cfl, grpar)
-        # t += dt
         # for i in grpar.cr_cell
         #     @views F_hat.f1[i] = Weno.update_numerical_flux(U.ρ[i-2:i+3],  F.f1[i-2:i+3], wepar)
         #     @views F_hat.f2[i] = Weno.update_numerical_flux(U.ρu[i-2:i+3], F.f2[i-2:i+3], wepar)
@@ -211,10 +216,6 @@ function euler(; γ=7/5, cfl=0.4, t_max=1.0)
         # end
 
         # Characteristic-wise reconstruction
-        # wepar.ev = maximum(U.u) + maximum(U_avg.evalRe)
-        dt = CFL_condition(wepar.ev, cfl, grpar)
-        t += dt 
-
         for i in grpar.cr_cell
             update_jacobian!(i, U, U_avg, γ, grpar)
             Weno.diagonalize_jacobian!(U_avg, grpar)
@@ -223,7 +224,6 @@ function euler(; γ=7/5, cfl=0.4, t_max=1.0)
             @views G_hat.f2[i] = Weno.update_numerical_flux(V.ρu[i-2:i+3], G.f2[i-2:i+3], wepar)
             @views G_hat.f3[i] = Weno.update_numerical_flux(V.E[i-2:i+3],  G.f3[i-2:i+3], wepar)
             project_to_realspace!(i, U_avg, F_hat, G_hat)
-            # @printf("%f\t%f\t%f\n", F_hat.f1[i], F_hat.f2[i], F_hat.f3[i])
         end
 
         Weno.time_evolution!(U.ρ,  F_hat.f1, dt, grpar, rkpar) 
@@ -231,11 +231,16 @@ function euler(; γ=7/5, cfl=0.4, t_max=1.0)
         Weno.time_evolution!(U.E,  F_hat.f3, dt, grpar, rkpar)
 
         conserved_to_primitive!(U, γ)
+
+        counter += 1
+        if counter % 100 == 0
+            @printf("Iteration %d: t = %2.3f, dt = %2.3e\n", counter, t, dt)
+        end
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    plot_system(U, grpar)
+    plot_system(U, grpar, "euler1d_shu_512")
 end
 
 # BenchmarkTools.@btime euler();
-@time euler()
+@time euler(t_max=1.8)
