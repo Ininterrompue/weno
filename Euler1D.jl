@@ -7,8 +7,8 @@
 
 include("./Weno.jl")
 import .Weno
-using Printf
-import Plots
+using Printf, LinearAlgebra
+import Plots, BenchmarkTools
 
 
 struct Variables{T}
@@ -19,16 +19,17 @@ struct Variables{T}
     E::Vector{T}    # energy
 end
 
-struct AveragedVariables{T}
+mutable struct AveragedVariables{T}
     ρ::Vector{T}
     u::Vector{T}
     P::Vector{T}
-    cr::UnitRange{Int}
-    J::Array{T, 3}
-    evalRe::Matrix{T}
-    evalIm::Matrix{T}
-    evecL::Array{T, 3}
-    evecR::Array{T, 3}
+    ρu::Vector{T}
+    E::Vector{T}
+    J::Matrix{T}
+    evalRe::Vector{T}
+    evalIm::Vector{T}
+    evecL::Matrix{T}
+    evecR::Matrix{T}
 end
 
 struct ProjectedVariables{T}
@@ -53,24 +54,27 @@ end
 
 function preallocate_averaged_variables(grpar)
     nx = grpar.nx
-    cr = range(grpar.cr[1]-1, stop=grpar.cr[end])
-    for x in [:ρ, :u, :P]
+    for x in [:ρ, :u, :P, :ρu, :E]
         @eval $x = zeros($nx+1)
     end
-    J = zeros(3, 3, nx+1)
-    evalRe = zeros(3, nx+1)
-    evalIm = zeros(3, nx+1)
-    evecL = zeros(3, 3, nx+1)
-    evecR = zeros(3, 3, nx+1)
+    J = zeros(3, 3)
+    evalRe = zeros(3)
+    evalIm = zeros(3)
+    evecL = zeros(3, 3)
+    evecR = zeros(3, 3)
 
-    return AveragedVariables(ρ, u, P, cr, J, evalRe, evalIm, evecL, evecR)
+    return AveragedVariables(ρ, u, P, ρu, E, J, evalRe, evalIm, evecL, evecR)
 end
 
 function preallocate_fluxes(grpar)
-    for x in [:f1, :f2, :f3]
+    for x in [:f1, :f2, :f3, :g1, :g2, :g3]
         @eval $x = zeros($grpar.nx)
     end
-    return Fluxes(f1, f2, f3), Fluxes(f1, f2, f3)
+    for x in [:h1, :h2, :h3, :j1, :j2, :j3]
+        @eval $x = zeros($grpar.nx+1)
+    end
+    return Fluxes(f1, f2, f3), Fluxes(g1, g2, g3),
+           Fluxes(h1, h2, h3), Fluxes(j1, j2, j3)
 end
 
 # Sod shock tube problem
@@ -107,17 +111,19 @@ function conserved_to_primitive!(U, γ)
     @. U.P = (γ-1) * (U.E - U.ρu^2 / 2U.ρ)
 end
 
-function arithmetic_average!(U, U_avg)
-    for i in U_avg.cr
-        U_avg.ρ[i] = 1/2 * (U.ρ[i] + U.ρ[i+1])
-        U_avg.u[i] = 1/2 * (U.u[i] + U.u[i+1])
-        U_avg.P[i] = 1/2 * (U.P[i] + U.P[i+1])
+function arithmetic_average!(U, U_avg, grpar)
+    for i in grpar.cr_cell
+        U_avg.ρ[i]  = 1/2 * (U.ρ[i]  + U.ρ[i+1])
+        U_avg.u[i]  = 1/2 * (U.u[i]  + U.u[i+1])
+        U_avg.P[i]  = 1/2 * (U.P[i]  + U.P[i+1])
+        U_avg.ρu[i] = 1/2 * (U.ρu[i] + U.ρu[i+1])
+        U_avg.E[i]  = 1/2 * (U.E[i]  + U.E[i+1])
     end
 end
 
 sound_speed(P, ρ, γ) = sqrt(γ*P/ρ)
 
-max_eigval(U, γ) = @. $maximum(abs(U.u) + sqrt(γ * U.P / U.ρ))
+max_eigval(U, γ) = @. $maximum(abs(U.u) + sound_speed(U.P, U.ρ, γ))
 
 CFL_condition(eigval, cfl, grpar) = 0.1 * cfl * grpar.dx / eigval
 
@@ -131,28 +137,39 @@ end
 J has dimensions (3, 3, nx+1).
 It is defined starting from the leftmost j-1/2.
 """
-function update_jacobian!(U, U_avg, γ)
-    arithmetic_average!(U, U_avg)
+function update_jacobian!(i, U, U_avg, γ, grpar)
+    arithmetic_average!(U, U_avg, grpar)
 
-    for i in U_avg.cr
-        U_avg.J[2, 1, i] = -(3-γ)/2 * U_avg.u[i]^2
-        U_avg.J[3, 1, i] = (γ-2)/2 * U_avg.u[i]^3 - (U_avg.u[i] *
-                           sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1))
-        U_avg.J[1, 2, i] = 1
-        U_avg.J[2, 2, i] = (3-γ) * U_avg.u[i]
-        U_avg.J[3, 2, i] = sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1) +
-                           (3-2γ)/2 * U_avg.u[i]^2
-        U_avg.J[2, 3, i] = γ-1
-        U_avg.J[3, 3, i] = γ * U_avg.u[i]
+    U_avg.J[2, 1] = -(3-γ)/2 * U_avg.u[i]^2
+    U_avg.J[3, 1] = (γ-2)/2 * U_avg.u[i]^3 - (U_avg.u[i] *
+                        sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1))
+    U_avg.J[1, 2] = 1
+    U_avg.J[2, 2] = (3-γ) * U_avg.u[i]
+    U_avg.J[3, 2] = sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1) +
+                        (3-2γ)/2 * U_avg.u[i]^2
+    U_avg.J[2, 3] = γ-1
+    U_avg.J[3, 3] = γ * U_avg.u[i]
+end
+
+function project_to_localspace!(i, U_avg, U, V, F, G)
+    for j in i-2:i+3
+        V.ρ[j]  = U_avg.evecL[1, 1] * U.ρ[j] + U_avg.evecL[1, 2] * U.ρu[j] + U_avg.evecL[1, 3] * U.E[j]
+        V.ρu[j] = U_avg.evecL[2, 1] * U.ρ[j] + U_avg.evecL[2, 2] * U.ρu[j] + U_avg.evecL[2, 3] * U.E[j]
+        V.E[j]  = U_avg.evecL[3, 1] * U.ρ[j] + U_avg.evecL[3, 2] * U.ρu[j] + U_avg.evecL[3, 3] * U.E[j]
+        G.f1[j] = U_avg.evecL[1, 1] * F.f1[j] + U_avg.evecL[1, 2] * F.f2[j] + U_avg.evecL[1, 3] * F.f3[j]
+        G.f2[j] = U_avg.evecL[2, 1] * F.f1[j] + U_avg.evecL[2, 2] * F.f2[j] + U_avg.evecL[2, 3] * F.f3[j]
+        G.f3[j] = U_avg.evecL[3, 1] * F.f1[j] + U_avg.evecL[3, 2] * F.f2[j] + U_avg.evecL[3, 3] * F.f3[j]
     end
 end
 
-function project_to_characteristic_fields!(U_avg, V, G)
-
+function project_to_realspace!(i, U_avg, F_hat, G_hat)
+    F_hat.f1[i] = U_avg.evecR[1, 1] * G_hat.f1[i] + U_avg.evecR[1, 2] * G_hat.f2[i] + U_avg.evecR[1, 3] * G_hat.f3[i]
+    F_hat.f2[i] = U_avg.evecR[2, 1] * G_hat.f1[i] + U_avg.evecR[2, 2] * G_hat.f2[i] + U_avg.evecR[2, 3] * G_hat.f3[i]
+    F_hat.f3[i] = U_avg.evecR[3, 1] * G_hat.f1[i] + U_avg.evecR[3, 2] * G_hat.f2[i] + U_avg.evecR[3, 3] * G_hat.f3[i]
 end
 
 function plot_system(U, grpar)
-    x = grpar.x; cr = grpar.cr
+    x = grpar.x; cr = grpar.cr_mesh
     plt = Plots.plot(x, U.ρ, title="1D Euler Equations", label="rho")
     Plots.plot!(x, U.u, label="u")
     Plots.plot!(x, U.P, label="P")
@@ -165,35 +182,53 @@ function euler(; γ=7/5, cfl=0.4, t_max=1.0)
     wepar = Weno.preallocate_weno_parameters(grpar)
     U, V = preallocate_variables(grpar)
     U_avg = preallocate_averaged_variables(grpar)
-    F, G = preallocate_fluxes(grpar)
+    F, G, F_hat, G_hat = preallocate_fluxes(grpar)
 
-    # sod!(U, grpar)
+    sod!(U, grpar)
     # lax!(U, grpar)
-    shu_osher!(U, grpar)
+    # shu_osher!(U, grpar)
 
     primitive_to_conserved!(U, γ)
     t = 0.0; counter = 0
 
+    # for q in 1:1
     while t < t_max
-        wepar.ev = max_eigval(U, γ)
-        dt = CFL_condition(wepar.ev, cfl, grpar)
-        t += dt; counter += 1
-        # @printf("Iteration %d: t = %2.3f\n", counter, t)
-
-        # Component-wise reconstruction
+        counter += 1
+        if counter % 100 == 0
+            @printf("Iteration %d: t = %2.3f\n", counter, t)
+        end
         update_fluxes!(F, U)
-        Weno.time_evolution!(U.ρ,  F.f1, dt, grpar, rkpar, wepar)
-        Weno.time_evolution!(U.ρu, F.f2, dt, grpar, rkpar, wepar)
-        Weno.time_evolution!(U.E,  F.f3, dt, grpar, rkpar, wepar)
+        
+        # Component-wise reconstruction
+        wepar.ev = max_eigval(U, γ)
+        # dt = CFL_condition(wepar.ev, cfl, grpar)
+        # t += dt
+        # for i in grpar.cr_cell
+        #     @views F_hat.f1[i] = Weno.update_numerical_flux(U.ρ[i-2:i+3],  F.f1[i-2:i+3], wepar)
+        #     @views F_hat.f2[i] = Weno.update_numerical_flux(U.ρu[i-2:i+3], F.f2[i-2:i+3], wepar)
+        #     @views F_hat.f3[i] = Weno.update_numerical_flux(U.E[i-2:i+3],  F.f3[i-2:i+3], wepar)
+        #     # @printf("%f\t%f\t%f\n", F_hat.f1[i], F_hat.f2[i], F_hat.f3[i])
+        # end
 
         # Characteristic-wise reconstruction
-        # 1. Update the Jacobian in this file.
-        # update_jacobian!(U, U_avg, γ)
-        # 2. Define the functions to convert to and from characteristic space in Weno.jl.
-        # Weno.diagonalize_jacobian!(U_avg)
-        # 3. Convert to char space in this file and call time_evolution on V and G.
-        # project_to_characteristic_fields!(U_avg, V, G)
-        # 4. Convert back to real space.
+        # wepar.ev = maximum(U.u) + maximum(U_avg.evalRe)
+        dt = CFL_condition(wepar.ev, cfl, grpar)
+        t += dt 
+
+        for i in grpar.cr_cell
+            update_jacobian!(i, U, U_avg, γ, grpar)
+            Weno.diagonalize_jacobian!(U_avg, grpar)
+            project_to_localspace!(i, U_avg, U, V, F, G)
+            @views G_hat.f1[i] = Weno.update_numerical_flux(V.ρ[i-2:i+3],  G.f1[i-2:i+3], wepar)
+            @views G_hat.f2[i] = Weno.update_numerical_flux(V.ρu[i-2:i+3], G.f2[i-2:i+3], wepar)
+            @views G_hat.f3[i] = Weno.update_numerical_flux(V.E[i-2:i+3],  G.f3[i-2:i+3], wepar)
+            project_to_realspace!(i, U_avg, F_hat, G_hat)
+            # @printf("%f\t%f\t%f\n", F_hat.f1[i], F_hat.f2[i], F_hat.f3[i])
+        end
+
+        Weno.time_evolution!(U.ρ,  F_hat.f1, dt, grpar, rkpar) 
+        Weno.time_evolution!(U.ρu, F_hat.f2, dt, grpar, rkpar)
+        Weno.time_evolution!(U.E,  F_hat.f3, dt, grpar, rkpar)
 
         conserved_to_primitive!(U, γ)
     end
@@ -202,4 +237,5 @@ function euler(; γ=7/5, cfl=0.4, t_max=1.0)
     plot_system(U, grpar)
 end
 
+# BenchmarkTools.@btime euler();
 @time euler()

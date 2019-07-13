@@ -1,6 +1,6 @@
 module Weno
 
-export grid, time_evolution!, diagonalize_jacobian!
+export grid, time_evolution!, diagonalize_jacobian!, update_numerical_flux
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 
 using LinearAlgebra
@@ -9,7 +9,8 @@ struct GridParameters
     nx::Int
     dx::Float64
     x::StepRangeLen{Float64, Float64, Float64}
-    cr::UnitRange{Int}
+    cr_mesh::UnitRange{Int}
+    cr_cell::UnitRange{Int}
     ghost::Int
 end
 
@@ -23,12 +24,7 @@ end
 mutable struct WenoParameters{T}
     fp::Vector{T}
     fm::Vector{T}
-    fp_local::Vector{T}
-    fm_local::Vector{T}
-    fp_local2::Vector{T}
-    fm_local2::Vector{T}
     ev::T
-    df::T
     fhat0::T
     fhat1::T
     fhat2::T
@@ -50,8 +46,9 @@ function grid(; size=32, min=-1.0, max=1.0, ghost=3)
     nx = 2*ghost + size
     dx = (max-min)/size
     x  = min - (ghost - 1/2)*dx : dx : max + (ghost - 1/2)*dx
-    cr = 1+ghost:nx-ghost
-    return GridParameters(nx, dx, x, cr, ghost)
+    cr_mesh = ghost+1:nx-ghost
+    cr_cell = ghost:nx-ghost
+    return GridParameters(nx, dx, x, cr_mesh, cr_cell, ghost)
 end
 
 function preallocate_rungekutta_parameters(grpar)
@@ -63,39 +60,14 @@ end
 function preallocate_weno_parameters(grpar)
     fp = zeros(grpar.nx)
     fm = zeros(grpar.nx)
-    fp_local = zeros(2grpar.ghost+1)
-    fm_local = zeros(2grpar.ghost+1)
-    fp_local2 = zeros(2grpar.ghost)
-    fm_local2 = zeros(2grpar.ghost)
-    return WenoParameters(fp, fm, fp_local, fm_local, fp_local2, fm_local2,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
+    return WenoParameters(fp, fm, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
 end
 
-function diagonalize_jacobian!(U_avg)
-    for i in U_avg.cr
-        U_avg.evalRe[:, i], U_avg.evalIm[:, i], 
-        U_avg.evecL[:, :, i], U_avg.evecR[:, :, i] =
-            LAPACK.geev!('V', 'V', U_avg.J[:, :, i])
-    end
-end
-
-# Lax-Friderichs flux splitting
-fplus(u, f, ev)  = 1/2 * (f + ev * u)
-fminus(u, f, ev) = 1/2 * (f - ev * u)
-
-function time_evolution!(u, f, dt, grpar, rkpar, wepar)
-    @. wepar.fp = fplus(u, f, wepar.ev)
-    @. wepar.fm = fminus(u, f, wepar.ev)
-
-    for i in grpar.cr
-        for j in 1:7
-            wepar.fp_local[j] = wepar.fp[i-3+j-1]
-            wepar.fm_local[j] = wepar.fm[i-3+j-1]
-        end
-        rkpar.op[i] = weno_scheme(grpar, wepar)
-    end
-    runge_kutta!(u, dt, rkpar)
+# Need to figure out a way to bypass the inv()
+function diagonalize_jacobian!(U_avg, grpar)
+    U_avg.evalRe, U_avg.evecR = eigen(U_avg.J)
+    U_avg.evecL = inv(U_avg.evecR)
 end
 
 function runge_kutta!(u, dt, rkpar)
@@ -106,28 +78,30 @@ function runge_kutta!(u, dt, rkpar)
 end
 
 # 5th order WENO finite-difference scheme
-function weno_scheme(grpar, wepar)
-    wepar.df = -1/grpar.dx *
-        (fhat(:+, "j+1/2", wepar) + fhat(:-, "j+1/2", wepar) -
-         fhat(:+, "j-1/2", wepar) - fhat(:-, "j-1/2", wepar))
-    return wepar.df
+function weno_scheme!(f_hat, grpar, rkpar)
+    for i in grpar.cr_mesh
+        rkpar.op[i] = -1/grpar.dx * (f_hat[i] - f_hat[i-1])
+    end
 end
 
-function fhat(flux_sign, half_sign, w)
-    if half_sign == "j+1/2"
-        for i in 1:6
-            w.fp_local2[i] = w.fp_local[i+1]
-            w.fm_local2[i] = w.fm_local[i+1]
-        end
-    elseif half_sign == "j-1/2"
-        for i in 1:6
-            w.fp_local2[i] = w.fp_local[i]
-            w.fm_local2[i] = w.fm_local[i]
-        end
-    end
+# Lax-Friderichs flux splitting
+fplus(u, f, ev)  = 1/2 * (f + ev * u)
+fminus(u, f, ev) = 1/2 * (f - ev * u)
 
-    fp = w.fp_local2
-    fm = w.fm_local2
+function time_evolution!(u, f, dt, grpar, rkpar)
+    weno_scheme!(f, grpar, rkpar)
+    runge_kutta!(u, dt, rkpar)
+end
+
+function update_numerical_flux(u, f, w)
+    w.fp = fplus(u, f, w.ev)
+    w.fm = fminus(u, f, w.ev)
+    return fhat(:+, w) + fhat(:-, w)
+end
+
+function fhat(flux_sign, w)
+    fp = w.fp
+    fm = w.fm
 
     if flux_sign == :+
         w.fhat0 =  1/3 * fp[1] - 7/6 * fp[2] + 11/6 * fp[3]

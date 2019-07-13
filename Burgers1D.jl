@@ -3,15 +3,15 @@
 include("./Weno.jl")
 import .Weno
 using Printf
-import Plots
+import Plots, BenchmarkTools
 
 
 function initialize_uf(grpar)
     nx = grpar.nx; x = grpar.x
-    u = zeros(nx); f = zeros(nx)
+    u = zeros(nx); f = zeros(nx); f_hat = zeros(nx+1)
     @. u = exp(-x^2)
     @. f = 1/2 * u^2
-    return u, f
+    return u, f, f_hat
 end
 
 update_flux!(f, u) = @. f = 1/2 * u^2
@@ -28,7 +28,7 @@ function boundary_conditions!(u)
 end
 
 function plot_system(u, grpar)
-    x = grpar.x; cr = grpar.cr
+    x = grpar.x; cr = grpar.cr_mesh
     plt = Plots.plot(x[cr], u[cr], title="1D Burgers' Equation", legend=false)
     display(plt)
 end
@@ -37,14 +37,17 @@ function burgers(; cfl=0.3, t_max=1.0)
     grpar = Weno.grid(size=256, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
     wepar = Weno.preallocate_weno_parameters(grpar)
-    u, f = initialize_uf(grpar)
+    u, f, f_hat = initialize_uf(grpar)
     dt = CFL_condition(grpar, cfl)
     t = 0.0; counter = 0
 
     while t < t_max
         t += dt; counter += 1
         wepar.ev = maximum(u)
-        Weno.time_evolution!(u, f, dt, grpar, rkpar, wepar)
+        for i in grpar.cr_cell
+            f_hat[i] = Weno.update_numerical_flux(u[i-2:i+3], f[i-2:i+3], wepar)
+        end
+        Weno.time_evolution!(u, f_hat, dt, grpar, rkpar)
         boundary_conditions!(u)
         update_flux!(f, u)
     end
@@ -53,4 +56,5 @@ function burgers(; cfl=0.3, t_max=1.0)
     plot_system(u, grpar)
 end
 
+# BenchmarkTools.@btime burgers(t_max=4.0);
 @time burgers(t_max=4.0)
