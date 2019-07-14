@@ -14,6 +14,15 @@ function initialize_uf(grpar)
     return u, f, f_hat
 end
 
+initialize_local() = zeros(6), zeros(6)
+
+function update_local!(i, u, f, u_local, f_local)
+    for j in 1:6
+        u_local[j] = u[i-3+j]
+        f_local[j] = f[i-3+j]
+    end
+end
+
 update_flux!(f, u) = @. f = 1/2 * u^2
 
 CFL_condition(grpar, cfl) = grpar.dx / 2 * cfl
@@ -38,6 +47,7 @@ function burgers(; cfl=0.3, t_max=1.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
     wepar = Weno.preallocate_weno_parameters(grpar)
     u, f, f_hat = initialize_uf(grpar)
+    u_local, f_local = initialize_local()
     dt = CFL_condition(grpar, cfl)
     t = 0.0; counter = 0
 
@@ -45,7 +55,8 @@ function burgers(; cfl=0.3, t_max=1.0)
         t += dt; counter += 1
         wepar.ev = maximum(u)
         for i in grpar.cr_cell
-            f_hat[i] = Weno.update_numerical_flux(u[i-2:i+3], f[i-2:i+3], wepar)
+            update_local!(i, u, f, u_local, f_local)
+            f_hat[i] = Weno.update_numerical_flux(u_local, f_local, wepar)
         end
         Weno.time_evolution!(u, f_hat, dt, grpar, rkpar)
         boundary_conditions!(u)

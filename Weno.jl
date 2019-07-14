@@ -17,7 +17,7 @@ end
 struct RungeKuttaParameters{T}
     op::Vector{T}  # du/dt = op(u, x) (nonlinear operator)
     u1::Vector{T}  # 1st RK-3 iteration
-    u2::Vector{T}  # 2nd RK-3 iteraiton
+    u2::Vector{T}  # 2nd RK-3 iteration
     u3::Vector{T}  # 3rd RK-3 iteration
 end
 
@@ -88,20 +88,21 @@ end
 fplus(u, f, ev)  = 1/2 * (f + ev * u)
 fminus(u, f, ev) = 1/2 * (f - ev * u)
 
-function time_evolution!(u, f, dt, grpar, rkpar)
-    weno_scheme!(f, grpar, rkpar)
+function time_evolution!(u, f_hat, dt, grpar, rkpar)
+    weno_scheme!(f_hat, grpar, rkpar)
     runge_kutta!(u, dt, rkpar)
 end
 
 function update_numerical_flux(u, f, w)
-    w.fp = fplus(u, f, w.ev)
-    w.fm = fminus(u, f, w.ev)
+    for i in eachindex(u)
+        w.fp[i] = fplus(u[i], f[i], w.ev)
+        w.fm[i] = fminus(u[i], f[i], w.ev)
+    end
     return fhat(:+, w) + fhat(:-, w)
 end
 
 function fhat(flux_sign, w)
-    fp = w.fp
-    fm = w.fm
+    fp = w.fp; fm = w.fm
 
     if flux_sign == :+
         w.fhat0 =  1/3 * fp[1] - 7/6 * fp[2] + 11/6 * fp[3]
@@ -113,11 +114,13 @@ function fhat(flux_sign, w)
         w.fhat2 =  1/3 * fm[6] - 7/6 * fm[5] + 11/6 * fm[4]
     end
 
-    nonlinear_weights!(flux_sign, fp, fm, w)
+    nonlinear_weights!(flux_sign, w)
     return w.w0 * w.fhat0 + w.w1 * w.fhat1 + w.w2 * w.fhat2
 end
 
-function nonlinear_weights!(flux_sign, fp, fm, w)
+function nonlinear_weights!(flux_sign, w)
+    fp = w.fp; fm = w.fm
+
     if flux_sign == :+
         w.IS0 = 13/12 * (fp[1] - 2 * fp[2] + fp[3])^2 +
                   1/4 * (fp[1] - 4 * fp[2] + 3 * fp[3])^2
