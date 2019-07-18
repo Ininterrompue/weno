@@ -1,4 +1,6 @@
-# Solves the inviscid 1D Burgers' equation with periodic boundary conditions.
+# Solves the inviscid 1D Burgers' equation 
+#   ∂u/∂t + ∂f/∂x = 0
+# with periodic boundary conditions.
 
 include("./Weno.jl")
 import .Weno
@@ -36,14 +38,15 @@ function boundary_conditions!(u)
     u[1] = u[end-5]
 end
 
-function plot_system(u, grpar)
+function plot_system(u, grpar, filename)
     x = grpar.x; cr = grpar.cr_mesh
     plt = Plots.plot(x[cr], u[cr], title="1D Burgers' Equation", legend=false)
     display(plt)
+    # Plots.png(plt, filename)
 end
 
 function burgers(; cfl=0.3, t_max=1.0)
-    grpar = Weno.grid(size=256, min=-5.0, max=5.0)
+    grpar = Weno.grid(size=512, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(grpar)
     wepar = Weno.preallocate_weno_parameters(grpar)
     u, f, f_hat = initialize_uf(grpar)
@@ -64,8 +67,8 @@ function burgers(; cfl=0.3, t_max=1.0)
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    plot_system(u, grpar)
+    plot_system(u, grpar, "burgers1d_t5_512")
 end
 
 # BenchmarkTools.@btime burgers(t_max=4.0);
-@time burgers(t_max=4.0)
+@time burgers(t_max=5.0)

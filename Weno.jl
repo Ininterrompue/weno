@@ -66,8 +66,8 @@ end
 
 # Need to figure out a way to bypass the inv()
 function diagonalize_jacobian!(U_avg, grpar)
-    U_avg.evalRe, U_avg.evecR = eigen(U_avg.J)
-    U_avg.evecL = inv(U_avg.evecR)
+    U_avg.eval, U_avg.R = eigen(U_avg.J)
+    U_avg.L = inv(U_avg.R)
 end
 
 function runge_kutta!(u, dt, rkpar)
