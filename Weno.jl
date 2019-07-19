@@ -65,9 +65,9 @@ function preallocate_weno_parameters(grpar)
 end
 
 # Need to figure out a way to bypass the inv()
-function diagonalize_jacobian!(U_avg, grpar)
-    U_avg.eval, U_avg.R = eigen(U_avg.J)
-    U_avg.L = inv(U_avg.R)
+function diagonalize_jacobian!(flxrec)
+    flxrec.eval, flxrec.R = eigen(flxrec.J)
+    flxrec.L = inv(flxrec.R)
 end
 
 function runge_kutta!(u, dt, rkpar)

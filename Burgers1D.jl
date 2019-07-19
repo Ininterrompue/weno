@@ -40,9 +40,9 @@ end
 
 function plot_system(u, grpar, filename)
     x = grpar.x; cr = grpar.cr_mesh
-    plt = Plots.plot(x[cr], u[cr], title="1D Burgers' Equation", legend=false)
+    plt = Plots.plot(x[cr], u[cr], title="Gaussian Wave", legend=false)
     display(plt)
-    # Plots.png(plt, filename)
+    Plots.pdf(plt, filename)
 end
 
 function burgers(; cfl=0.3, t_max=1.0)

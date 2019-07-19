@@ -13,124 +13,107 @@ import Plots, BenchmarkTools
 
 
 struct Variables{T}
-    ρ::Vector{T}    # density
-    u::Vector{T}    # velocity
-    P::Vector{T}    # pressure
-    ρu::Vector{T}   # momentum
-    E::Vector{T}    # energy
+    ρ::Matrix{T}    # density
+    u::Matrix{T}    # velocity
+    v::Matrix{T}
+    P::Matrix{T}    # pressure
+    ρu::Matrix{T}   # momentum
+    ρv::Matrix{T}
+    E::Matrix{T}    # energy
 end
 
-mutable struct AveragedVariables{T}
-    ρ::Vector{T}
-    u::Vector{T}
-    P::Vector{T}
-    ρu::Vector{T}
-    E::Vector{T}
-    J::Matrix{T}
-    evalRe::Vector{T}
-    evalIm::Vector{T}
-    evecL::Matrix{T}
-    evecR::Matrix{T}
-end
-
-struct ProjectedVariables{T}
-    ρ::Vector{T}
-    ρu::Vector{T}
-    E::Vector{T}
+struct ConservedVariables{T}
+    ρ::Matrix{T}
+    ρu::Matrix{T}
+    ρv::Matrix{T}
+    E::Matrix{T}
 end
 
 struct Fluxes{T}
-    f1::Vector{T}
-    f2::Vector{T}
-    f3::Vector{T}
+    Fx::ConservedVariables{T}       # physical flux, real space
+    Fy::ConservedVariables{T}
+    Gx::ConservedVariables{T}       # physical flux, charateristic space
+    Gy::ConservedVariables{T}
+    Fx_hat::ConservedVariables{T}   # numerical flux, real space
+    Fy_hat::ConservedVariables{T}
+    Gx_hat::ConservedVariables{T}   # numerical flux, charateristic space
+    Gy_hat::ConservedVariables{T}
 end
 
+mutable struct FluxReconstruction{T}
+    Q::Variables{T}     # averaged quantities
+    Jx::Matrix{T}       # Jacobians
+    Jy::Matrix{T}
+    evalx::Vector{T}    # eigenvalues
+    evaly::Vector{T}
+    evecLx::Matrix{T}   # left eigenvectors
+    evecLy::Matrix{T}
+    evecRx::Matrix{T}   # right eigenvectors
+    evecRy::Matrix{T}
+end
+
+
 function preallocate_variables(grpar)
-    for x in [:ρ, :u, :P, :ρu, :E, :ρ2, :ρu2, :E2]
-        @eval $x = zeros($grpar.nx)
+    for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E, :ρ2, :ρu2, :ρv2, :E2]
+        @eval $x = zeros($grpar.nx, $grpar.nx)
     end
 
-    return Variables(ρ, u, P, ρu, E), ProjectedVariables(ρ2, ρu2, E2)
+    return Variables(ρ, u, v, P, ρu, ρv, E), ConservedVariables(ρ2, ρu2, ρv2, E2)
 end
 
 function preallocate_averaged_variables(grpar)
     nx = grpar.nx
-    for x in [:ρ, :u, :P, :ρu, :E]
-        @eval $x = zeros($nx+1)
+    for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E]
+        @eval $x = zeros($nx+1, $nx+1)
     end
-    J = zeros(3, 3)
-    evalRe = zeros(3)
-    evalIm = zeros(3)
-    evecL = zeros(3, 3)
-    evecR = zeros(3, 3)
+    for x in [:Jx, :Jy, :evecLx, :evecLy, :evecRx, :evecRy]
+        @eval $x = zeros(4, 4)
+    end
+    evalx = zeros(4)
+    evaly = zeros(4)
 
-    return AveragedVariables(ρ, u, P, ρu, E, J, evalRe, evalIm, evecL, evecR)
+    return FluxReconstruction(ρ, u, v, P, ρu, ρv, E, Jx, Jy, 
+        evalx, evaly, evecLx, evecLy, evecRx, evecRy)
 end
 
 function preallocate_fluxes(grpar)
-    for x in [:f1, :f2, :f3, :g1, :g2, :g3]
+    for x in [:f1, :f2, :f3, :f4, :g1, :g2, :g3, :g4]
         @eval $x = zeros($grpar.nx)
     end
-    for x in [:h1, :h2, :h3, :j1, :j2, :j3]
+    for x in [:h1, :h2, :h3, :h4, :j1, :j2, :j3, :j4]
         @eval $x = zeros($grpar.nx+1)
     end
-    return Fluxes(f1, f2, f3), Fluxes(g1, g2, g3),
-           Fluxes(h1, h2, h3), Fluxes(j1, j2, j3)
+    return ConservedVariables(f1, f2, f3, f4), ConservedVariables(g1, g2, g3, g4),
+           ConservedVariables(h1, h2, h3, h4), ConservedVariables(j1, j2, j3, j4)
 end
 
 function preallocate_local()
-    local_variables = ProjectedVariables(zeros(6), zeros(6), zeros(6))
-    local_fluxes = Fluxes(zeros(6), zeros(6), zeros(6))
+    local_variables = ConservedVariables(zeros(6), zeros(6), zeros(6), zeros(6))
+    local_fluxes    = ConservedVariables(zeros(6), zeros(6), zeros(6), zeros(6))
     return local_variables, local_fluxes
 end
 
-"""
-Sod shock tube problem
-x = [-0.5, 0.5], t_max = 0.14
-"""
-function sod!(U, grpar)
-    half = grpar.nx ÷ 2
-    U.ρ[1:half] .= 1; U.ρ[half+1:end] .= 0.125
-    U.P[1:half] .= 1; U.P[half+1:end] .= 0.1
-end
-
-"""
-Lax problem
-x = [-0.5, 0.5], t_max = 0.13
-"""
-function lax!(U, grpar)
-    half = grpar.nx ÷ 2
-    U.ρ[1:half] .= 0.445; U.ρ[half+1:end] .= 0.5
-    U.u[1:half] .= 0.698
-    U.P[1:half] .= 3.528; U.P[half+1:end] .= 0.571
-end
-
-"""
-Shu-Osher problem
-x = [-5, 5], t_max = 1.8
-"""
-function shu_osher!(U, grpar)
-    tenth = grpar.nx ÷ 10
-    @. U.ρ = 1.0 + 1/5 * sin(5 * grpar.x)
-    U.ρ[1:tenth] .= 27/7
-    U.u[1:tenth] .= 4/9 * sqrt(35)
-    U.P[1:tenth] .= 31/3; U.P[tenth+1:end] .= 1.0
+"""Initial conditions"""
+function foo
 end
 
 function primitive_to_conserved!(U, γ)
     @. U.ρu = U.ρ * U.u
-    @. U.E  = U.P / (γ-1) + 1/2 * U.ρ * U.u^2
+    @. U.ρv = U.ρ * U.v
+    @. U.E  = U.P / (γ-1) + 1/2 * U.ρ * (U.u^2 + U.v^2)
 end
 
 function conserved_to_primitive!(U, γ)
     @. U.u = U.ρu / U.ρ
-    @. U.P = (γ-1) * (U.E - U.ρu^2 / 2U.ρ)
+    @. U.v = U.ρv / U.ρ
+    @. U.P = (γ-1) * (U.E - 1/2 * (U.ρu^2 + U.ρv^2) / U.ρ)
 end
 
 function arithmetic_average!(U, U_avg, grpar)
     for i in grpar.cr_cell
         U_avg.ρ[i]  = 1/2 * (U.ρ[i]  + U.ρ[i+1])
         U_avg.u[i]  = 1/2 * (U.u[i]  + U.u[i+1])
+        U_avg.v[i]  = 1/2 * (U.v[i]  + U.v[i+1])
         U_avg.P[i]  = 1/2 * (U.P[i]  + U.P[i+1])
         U_avg.ρu[i] = 1/2 * (U.ρu[i] + U.ρu[i+1])
         U_avg.E[i]  = 1/2 * (U.E[i]  + U.E[i+1])
@@ -172,27 +155,27 @@ function update_local!(i, U, F, U_local, F_local)
         U_local.ρ[j]  = U.ρ[i-3+j]
         U_local.ρu[j] = U.ρu[i-3+j]
         U_local.E[j]  = U.E[i-3+j]
-        F_local.f1[j] = F.f1[i-3+j]
-        F_local.f2[j] = F.f2[i-3+j]
-        F_local.f3[j] = F.f3[i-3+j]
+        F_local.ρ[j]  = F.ρ[i-3+j]
+        F_local.ρu[j] = F.ρu[i-3+j]
+        F_local.E[j]  = F.E[i-3+j]
     end
 end
 
 function project_to_localspace!(i, U_avg, U, V, F, G)
     for j in i-2:i+3
-        V.ρ[j]  = U_avg.evecL[1, 1] * U.ρ[j] + U_avg.evecL[1, 2] * U.ρu[j] + U_avg.evecL[1, 3] * U.E[j]
-        V.ρu[j] = U_avg.evecL[2, 1] * U.ρ[j] + U_avg.evecL[2, 2] * U.ρu[j] + U_avg.evecL[2, 3] * U.E[j]
-        V.E[j]  = U_avg.evecL[3, 1] * U.ρ[j] + U_avg.evecL[3, 2] * U.ρu[j] + U_avg.evecL[3, 3] * U.E[j]
-        G.f1[j] = U_avg.evecL[1, 1] * F.f1[j] + U_avg.evecL[1, 2] * F.f2[j] + U_avg.evecL[1, 3] * F.f3[j]
-        G.f2[j] = U_avg.evecL[2, 1] * F.f1[j] + U_avg.evecL[2, 2] * F.f2[j] + U_avg.evecL[2, 3] * F.f3[j]
-        G.f3[j] = U_avg.evecL[3, 1] * F.f1[j] + U_avg.evecL[3, 2] * F.f2[j] + U_avg.evecL[3, 3] * F.f3[j]
+        V.ρ[j]  = U_avg.L[1, 1] * U.ρ[j] + U_avg.L[1, 2] * U.ρu[j] + U_avg.L[1, 3] * U.E[j]
+        V.ρu[j] = U_avg.L[2, 1] * U.ρ[j] + U_avg.L[2, 2] * U.ρu[j] + U_avg.L[2, 3] * U.E[j]
+        V.E[j]  = U_avg.L[3, 1] * U.ρ[j] + U_avg.L[3, 2] * U.ρu[j] + U_avg.L[3, 3] * U.E[j]
+        G.ρ[j]  = U_avg.L[1, 1] * F.ρ[j] + U_avg.L[1, 2] * F.ρu[j] + U_avg.L[1, 3] * F.E[j]
+        G.ρu[j] = U_avg.L[2, 1] * F.ρ[j] + U_avg.L[2, 2] * F.ρu[j] + U_avg.L[2, 3] * F.E[j]
+        G.E[j]  = U_avg.L[3, 1] * F.ρ[j] + U_avg.L[3, 2] * F.ρu[j] + U_avg.L[3, 3] * F.E[j]
     end
 end
 
-function project_to_realspace!(i, U_avg, F_hat, G_hat)
-    F_hat.f1[i] = U_avg.evecR[1, 1] * G_hat.f1[i] + U_avg.evecR[1, 2] * G_hat.f2[i] + U_avg.evecR[1, 3] * G_hat.f3[i]
-    F_hat.f2[i] = U_avg.evecR[2, 1] * G_hat.f1[i] + U_avg.evecR[2, 2] * G_hat.f2[i] + U_avg.evecR[2, 3] * G_hat.f3[i]
-    F_hat.f3[i] = U_avg.evecR[3, 1] * G_hat.f1[i] + U_avg.evecR[3, 2] * G_hat.f2[i] + U_avg.evecR[3, 3] * G_hat.f3[i]
+function project_to_realspace!(i, U, F, G)
+    F.ρ[i]  = U.R[1, 1] * G.ρ[i] + U.R[1, 2] * G.ρu[i] + U.R[1, 3] * G.E[i]
+    F.ρu[i] = U.R[2, 1] * G.ρ[i] + U.R[2, 2] * G.ρu[i] + U.R[2, 3] * G.E[i]
+    F.E[i]  = U.R[3, 1] * G.ρ[i] + U.R[3, 2] * G.ρu[i] + U.R[3, 3] * G.E[i]
 end
 
 function plot_system(U, grpar, filename)
@@ -213,9 +196,7 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
     F, G, F_hat, G_hat = preallocate_fluxes(grpar)
     U_local, F_local = preallocate_local()
 
-    # sod!(U, grpar)
-    # lax!(U, grpar)
-    shu_osher!(U, grpar)
+    # initial condition
 
     primitive_to_conserved!(U, γ)
     t = 0.0; counter = 0
