@@ -1,7 +1,8 @@
 module Weno
 
-export grid, time_evolution!, diagonalize_jacobian!, update_numerical_flux
+export grid, diagonalize_jacobian!, update_numerical_flux
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
+export weno_scheme!, runge_kutta!
 
 using LinearAlgebra
 
@@ -15,10 +16,10 @@ struct GridParameters
 end
 
 struct RungeKuttaParameters{T}
-    op::Vector{T}  # du/dt = op(u, x) (nonlinear operator)
-    u1::Vector{T}  # 1st RK-3 iteration
-    u2::Vector{T}  # 2nd RK-3 iteration
-    u3::Vector{T}  # 3rd RK-3 iteration
+    op::T   # du/dt = op(u, x) (nonlinear operator)
+    u1::T   # 1st RK-3 iteration
+    u2::T   # 2nd RK-3 iteration
+    u3::T   # 3rd RK-3 iteration
 end
 
 mutable struct WenoParameters{T}
@@ -51,15 +52,23 @@ function grid(; size=32, min=-1.0, max=1.0, ghost=3)
     return GridParameters(nx, dx, x, cr_mesh, cr_cell, ghost)
 end
 
-function preallocate_rungekutta_parameters(grpar)
-    op = zeros(grpar.nx); u1 = zeros(grpar.nx)
-    u2 = zeros(grpar.nx); u3 = zeros(grpar.nx)
+function preallocate_rungekutta_parameters(gridx)
+    for x in [:op, :u1, :u2, :u3]
+        @eval $x = zeros($gridx.nx)
+    end
     return RungeKuttaParameters(op, u1, u2, u3)
 end
 
-function preallocate_weno_parameters(grpar)
-    fp = zeros(grpar.nx)
-    fm = zeros(grpar.nx)
+function preallocate_rungekutta_parameters(gridx, gridy)
+    for x in [:op, :u1, :u2, :u3]
+        @eval $x = zeros($gridx.nx, $gridy.nx)
+    end
+    return RungeKuttaParameters(op, u1, u2, u3)
+end
+
+function preallocate_weno_parameters(gridx)
+    fp = zeros(gridx.nx)
+    fm = zeros(gridx.nx)
     return WenoParameters(fp, fm, 0.0, 0.0, 0.0, 0.0, 0.0, 
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
 end
@@ -77,21 +86,23 @@ function runge_kutta!(u, dt, rkpar)
     @. u = rkpar.u3
 end
 
-# 5th order WENO finite-difference scheme
-function weno_scheme!(f_hat, grpar, rkpar)
-    for i in grpar.cr_mesh
-        rkpar.op[i] = -1/grpar.dx * (f_hat[i] - f_hat[i-1])
+function weno_scheme!(f_hat, gridx, rkpar)
+    for i in gridx.cr_mesh
+        rkpar.op[i] = -1/gridx.dx * (f_hat[i] - f_hat[i-1])
+    end
+end
+
+function weno_scheme!(fx_hat, fy_hat, gridx, gridy, rkpar)
+    for j in gridy.cr_mesh, i in gridx.cr_mesh
+        rkpar.op[i, j] = 
+            -1/gridx.dx * (fx_hat[i, j] - fx_hat[i-1, j]) +
+            -1/gridy.dx * (fy_hat[i, j] - fy_hat[i, j-1])
     end
 end
 
 # Lax-Friderichs flux splitting
 fplus(u, f, ev)  = 1/2 * (f + ev * u)
 fminus(u, f, ev) = 1/2 * (f - ev * u)
-
-function time_evolution!(u, f_hat, dt, grpar, rkpar)
-    weno_scheme!(f_hat, grpar, rkpar)
-    runge_kutta!(u, dt, rkpar)
-end
 
 function update_numerical_flux(u, f, w)
     for i in eachindex(u)
@@ -122,15 +133,12 @@ function nonlinear_weights!(flux_sign, w)
     fp = w.fp; fm = w.fm
 
     if flux_sign == :+
-        w.IS0 = 13/12 * (fp[1] - 2 * fp[2] + fp[3])^2 +
-                  1/4 * (fp[1] - 4 * fp[2] + 3 * fp[3])^2
-        w.IS1 = 13/12 * (fp[2] - 2 * fp[3] + fp[4])^2 +
-                  1/4 * (fp[2] - fp[4])^2
-        w.IS2 = 13/12 * (fp[3] - 2 * fp[4] + fp[5])^2 +
-                  1/4 * (3 * fp[3] - 4 * fp[4] + fp[5])^2
+        w.IS0 = 13/12 * (fp[1] - 2fp[2] + fp[3])^2 + 1/4 * (fp[1] - 4fp[2] + 3fp[3])^2
+        w.IS1 = 13/12 * (fp[2] - 2fp[3] + fp[4])^2 + 1/4 * (fp[2] - fp[4])^2
+        w.IS2 = 13/12 * (fp[3] - 2fp[4] + fp[5])^2 + 1/4 * (3fp[3] - 4fp[4] + fp[5])^2
 
         # Yamaleev and Carpenter, 2009
-        w.τ = (fp[1] - 4 * fp[2] + 6 * fp[3] - 4 * fp[4] + fp[5])^2
+        w.τ = (fp[1] - 4fp[2] + 6fp[3] - 4fp[4] + fp[5])^2
         w.α0 = 1/10 * (1 + (w.τ / (w.ϵ + w.IS0))^2)
         w.α1 = 6/10 * (1 + (w.τ / (w.ϵ + w.IS1))^2)
         w.α2 = 3/10 * (1 + (w.τ / (w.ϵ + w.IS2))^2)
@@ -141,14 +149,11 @@ function nonlinear_weights!(flux_sign, w)
         # w.α2 = 3/10 / (w.ϵ + w.IS2)^2
 
     elseif flux_sign == :-
-        w.IS0 = 13/12 * (fm[2] - 2 * fm[3] + fm[4])^2 +
-                  1/4 * (fm[2] - 4 * fm[3] + 3 * fm[4])^2
-        w.IS1 = 13/12 * (fm[3] - 2 * fm[4] + fm[5])^2 +
-                  1/4 * (fm[3] - fm[5])^2
-        w.IS2 = 13/12 * (fm[4] - 2 * fm[5] + fm[6])^2 +
-                  1/4 * (3 * fm[4] - 4 * fm[5] + fm[6])^2
+        w.IS0 = 13/12 * (fm[2] - 2fm[3] + fm[4])^2 + 1/4 * (fm[2] - 4fm[3] + 3fm[4])^2
+        w.IS1 = 13/12 * (fm[3] - 2fm[4] + fm[5])^2 + 1/4 * (fm[3] - fm[5])^2
+        w.IS2 = 13/12 * (fm[4] - 2fm[5] + fm[6])^2 + 1/4 * (3fm[4] - 4fm[5] + fm[6])^2
 
-        w.τ = (fm[2] - 4 * fm[3] + 6 * fm[4] - 4 * fm[5] + fm[6])^2
+        w.τ = (fm[2] - 4fm[3] + 6fm[4] - 4fm[5] + fm[6])^2
         w.α0 = 3/10 * (1 + (w.τ / (w.ϵ + w.IS0))^2)
         w.α1 = 6/10 * (1 + (w.τ / (w.ϵ + w.IS1))^2)
         w.α2 = 1/10 * (1 + (w.τ / (w.ϵ + w.IS2))^2)

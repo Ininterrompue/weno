@@ -1,16 +1,18 @@
 # Solves the 2D Euler equations
-#   ∂U/∂t + ∂F/∂x + ∂G/∂y = 0
-# where U = [ρ, ρu, ρv, E],
-#       F = [ρu, ρu² + P, ρuv, u(E + P)]
-#       G = [ρv, ρvu, ρv² + P, v(E + P)]
-# and   E = P/(γ-1) + 1/2 * ρ(u² + v²).
+#   ∂t(Q) + ∂x(Fx) + ∂y(Fy) = 0
+# where Q  = [ρ, ρu, ρv, E],
+#       Fx = [ρu, ρu² + P, ρuv, u(E + P)]
+#       Fy = [ρv, ρvu, ρv² + P, v(E + P)]
+# and   E  = P/(γ-1) + 1/2 * ρ(u² + v²).
 # For a gas with 5 dofs, γ = 7/5.
 
 include("./Weno.jl")
-import .Weno
 using Printf, LinearAlgebra
 import Plots, BenchmarkTools
+Plots.pyplot()
 
+abstract type BoundaryCondition end
+struct DoubleMachReflection <: BoundaryCondition end
 
 struct Variables{T}
     ρ::Matrix{T}    # density
@@ -29,209 +31,273 @@ struct ConservedVariables{T}
     E::Matrix{T}
 end
 
+struct StateVectors{T}
+    Q::Variables{T}                  # real space
+    Q_proj::ConservedVariables{T}    # characteristic space
+    Q_local::ConservedVariables{T}   # local real space
+end
+
 struct Fluxes{T}
-    Fx::ConservedVariables{T}       # physical flux, real space
+    Fx::ConservedVariables{T}        # physical flux, real space
     Fy::ConservedVariables{T}
-    Gx::ConservedVariables{T}       # physical flux, charateristic space
+    Gx::ConservedVariables{T}        # physical flux, characteristic space
     Gy::ConservedVariables{T}
-    Fx_hat::ConservedVariables{T}   # numerical flux, real space
+    Fx_hat::ConservedVariables{T}    # numerical flux, real space
     Fy_hat::ConservedVariables{T}
-    Gx_hat::ConservedVariables{T}   # numerical flux, charateristic space
+    Gx_hat::ConservedVariables{T}    # numerical flux, characteristic space
     Gy_hat::ConservedVariables{T}
+    F_local::ConservedVariables{T}   # local physical flux, real space
 end
 
 mutable struct FluxReconstruction{T}
-    Q::Variables{T}     # averaged quantities
-    Jx::Matrix{T}       # Jacobians
+    Q_avg::Variables{T}   # averaged quantities
+    Jx::Matrix{T}         # Jacobians
     Jy::Matrix{T}
-    evalx::Vector{T}    # eigenvalues
+    evalx::Vector{T}      # eigenvalues
     evaly::Vector{T}
-    evecLx::Matrix{T}   # left eigenvectors
+    evecLx::Matrix{T}     # left eigenvectors
     evecLy::Matrix{T}
-    evecRx::Matrix{T}   # right eigenvectors
+    evecRx::Matrix{T}     # right eigenvectors
     evecRy::Matrix{T}
 end
 
 
-function preallocate_variables(grpar)
+function preallocate_statevectors(gridx)
     for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E, :ρ2, :ρu2, :ρv2, :E2]
-        @eval $x = zeros($grpar.nx, $grpar.nx)
+        @eval $x = zeros($gridx.nx, $gridx.nx)
     end
-
-    return Variables(ρ, u, v, P, ρu, ρv, E), ConservedVariables(ρ2, ρu2, ρv2, E2)
+    for x in [:ρ3, :ρu3, :ρv3, :E3]
+        @eval $x = zeros(6)
+    end
+    Q = Variables(ρ, u, v, P, ρu, ρv, E)
+    Q_proj = ConservedVariables(ρ2, ρu2, ρv2, E2)
+    Q_local = ConservedVariables(ρ3, ρu3, ρv3, E3)
+    return StateVectors(Q, Q_proj, Q_local)
 end
 
-function preallocate_averaged_variables(grpar)
-    nx = grpar.nx
-    for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E]
-        @eval $x = zeros($nx+1, $nx+1)
+function preallocate_fluxes(gridx)
+    for x in [:f1, :f2, :f3, :f4, :g1, :g2, :g3, :g4]
+        @eval $x = zeros($gridx.nx, $gridx.nx)
     end
+    for x in [:f1_hat, :f2_hat, :f3_hat, :f4_hat, 
+              :g1_hat, :g2_hat, :g3_hat, :g4_hat]
+        @eval $x = zeros($gridx.nx+1, $gridx.nx+1)
+    end
+    for x in [:f1_local, :f2_local, :f3_local, :f4_local]
+        @eval $x = zeros(6)
+    end
+    F = ConservedVariables(f1, f2, f3, f4)
+    G = ConservedVariables(g1, g2, g3, g4)
+    F_hat = ConservedVariables(f1_hat, f2_hat, f3_hat, f4_hat)
+    G_hat = ConservedVariables(g1_hat, g2_hat, g3_hat, g4_hat)
+    F_local = ConservedVariables(f1_local, f2_local, f3_local, f4_local)
+    return Fluxes(F, G, F_hat, G_hat, F_local)
+end
+
+function preallocate_fluxreconstruction(gridx)
+    for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E]
+        @eval $x = zeros($gridx.nx+1, $gridx.nx+1)
+    end
+    Q_avg = Variables(ρ, u, v, P, ρu, ρv, E)
     for x in [:Jx, :Jy, :evecLx, :evecLy, :evecRx, :evecRy]
         @eval $x = zeros(4, 4)
     end
-    evalx = zeros(4)
-    evaly = zeros(4)
-
-    return FluxReconstruction(ρ, u, v, P, ρu, ρv, E, Jx, Jy, 
-        evalx, evaly, evecLx, evecLy, evecRx, evecRy)
+    evalx = zeros(4); evaly = zeros(4)
+    return FluxReconstruction(Q_avg, Jx, Jy, evalx, evaly, 
+        evecLx, evecLy, evecRx, evecRy)
 end
 
-function preallocate_fluxes(grpar)
-    for x in [:f1, :f2, :f3, :f4, :g1, :g2, :g3, :g4]
-        @eval $x = zeros($grpar.nx)
-    end
-    for x in [:h1, :h2, :h3, :h4, :j1, :j2, :j3, :j4]
-        @eval $x = zeros($grpar.nx+1)
-    end
-    return ConservedVariables(f1, f2, f3, f4), ConservedVariables(g1, g2, g3, g4),
-           ConservedVariables(h1, h2, h3, h4), ConservedVariables(j1, j2, j3, j4)
+"""
+Double Mach reflection problem
+(x, y) = [0, 3.25] × [0, 1], t_max = 0.2
+"""
+function doublemach!(Q, gridx, gridy)
+    crx = gridx.cr_mesh; cry = gridy.cr_mesh
+
+    onesixth = argmin(@. abs(gridx - 1/6))
 end
 
-function preallocate_local()
-    local_variables = ConservedVariables(zeros(6), zeros(6), zeros(6), zeros(6))
-    local_fluxes    = ConservedVariables(zeros(6), zeros(6), zeros(6), zeros(6))
-    return local_variables, local_fluxes
+
+function primitive_to_conserved!(Q, γ)
+    @. Q.ρu = Q.ρ * Q.u
+    @. Q.ρv = Q.ρ * Q.v
+    @. Q.E  = Q.P / (γ-1) + 1/2 * Q.ρ * (Q.u^2 + Q.v^2)
 end
 
-"""Initial conditions"""
-function foo
+function conserved_to_primitive!(Q, γ)
+    @. Q.u = Q.ρu / Q.ρ
+    @. Q.v = Q.ρv / Q.ρ
+    @. Q.P = (γ-1) * (Q.E - (Q.ρu^2 + Q.ρv^2) / 2Q.ρ)
 end
 
-function primitive_to_conserved!(U, γ)
-    @. U.ρu = U.ρ * U.u
-    @. U.ρv = U.ρ * U.v
-    @. U.E  = U.P / (γ-1) + 1/2 * U.ρ * (U.u^2 + U.v^2)
-end
-
-function conserved_to_primitive!(U, γ)
-    @. U.u = U.ρu / U.ρ
-    @. U.v = U.ρv / U.ρ
-    @. U.P = (γ-1) * (U.E - 1/2 * (U.ρu^2 + U.ρv^2) / U.ρ)
-end
-
-function arithmetic_average!(U, U_avg, grpar)
-    for i in grpar.cr_cell
-        U_avg.ρ[i]  = 1/2 * (U.ρ[i]  + U.ρ[i+1])
-        U_avg.u[i]  = 1/2 * (U.u[i]  + U.u[i+1])
-        U_avg.v[i]  = 1/2 * (U.v[i]  + U.v[i+1])
-        U_avg.P[i]  = 1/2 * (U.P[i]  + U.P[i+1])
-        U_avg.ρu[i] = 1/2 * (U.ρu[i] + U.ρu[i+1])
-        U_avg.E[i]  = 1/2 * (U.E[i]  + U.E[i+1])
+function arithmetic_average!(Q, Q_avg, gridx)
+    for i in gridx.cr_cell
+        Q_avg.ρ[i]  = 1/2 * (Q.ρ[i]  + Q.ρ[i+1])
+        Q_avg.u[i]  = 1/2 * (Q.u[i]  + Q.u[i+1])
+        Q_avg.v[i]  = 1/2 * (Q.v[i]  + Q.v[i+1])
+        Q_avg.P[i]  = 1/2 * (Q.P[i]  + Q.P[i+1])
     end
 end
 
 sound_speed(P, ρ, γ) = sqrt(γ*P/ρ)
 
-max_eigval(U, γ) = @. $maximum(abs(U.u) + sound_speed(U.P, U.ρ, γ))
+max_eigval(Q, γ) = @. $maximum(sqrt(Q.u^2 + Q.v^2) + sound_speed(Q.P, Q.ρ, γ))
 
-CFL_condition(eigval, cfl, grpar) = 0.1 * cfl * grpar.dx / eigval
+CFL_condition(eigval, cfl, gridx) = 0.1 * cfl * gridx.dx / eigval
 
-function update_fluxes!(F, U)
-    @. F.f1 = U.ρu
-    @. F.f2 = U.ρu^2 / U.ρ + U.P
-    @. F.f3 = U.u * (U.E + U.P)
+function update_physical_fluxes!(flux, Q)
+    Fx = flux.Fx; Fy = flux.Fy 
+    @. Fx.ρ  = Q.ρu
+    @. Fx.ρu = Q.ρ * Q.u^2 + Q.P
+    @. Fx.ρv = Q.ρ * Q.u * Q.v
+    @. Fx.E  = Q.u * (Q.E + Q.P)
+    @. Fy.ρ  = Q.ρv
+    @. Fy.ρu = Q.ρ * Q.u * Q.v
+    @. Fy.ρv = Q.ρ * Q.v^2 + Q.Plots
+    @. Fy.E  = Q.v * (Q.E + Q.P)
 end
 
-"""
-J has dimensions (3, 3, nx+1).
-It is defined starting from the leftmost j-1/2.
-"""
-function update_jacobian!(i, U, U_avg, γ, grpar)
-    arithmetic_average!(U, U_avg, grpar)
 
-    U_avg.J[2, 1] = -(3-γ)/2 * U_avg.u[i]^2
-    U_avg.J[3, 1] = (γ-2)/2 * U_avg.u[i]^3 - (U_avg.u[i] *
-                        sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1))
-    U_avg.J[1, 2] = 1
-    U_avg.J[2, 2] = (3-γ) * U_avg.u[i]
-    U_avg.J[3, 2] = sound_speed(U_avg.P[i], U_avg.ρ[i], γ)^2 / (γ-1) +
-                        (3-2γ)/2 * U_avg.u[i]^2
-    U_avg.J[2, 3] = γ-1
-    U_avg.J[3, 3] = γ * U_avg.u[i]
+# J is defined starting from the leftmost j-1/2.
+function update_jacobian!(i, Q, flxrec, γ, gridx)
+    Q_avg = flxrec.Q_avg; Jx = flxrec.Jx
+
+    arithmetic_average!(Q, Q_avg, gridx)
+    Jx[2, 1] = -(3-γ)/2 * Q_avg.u[i]^2
+    Jx[3, 1] = (γ-2)/2 * Q_avg.u[i]^3 - (Q_avg.u[i] * (γ * Q_avg.P[i] / Q_avg.ρ[i]) / (γ-1))
+    Jx[1, 2] = 1
+    Jx[2, 2] = (3-γ) * Q_avg.u[i]
+    Jx[3, 2] = (γ * Q_avg.P[i] / Q_avg.ρ[i]) / (γ-1) + (3-2γ)/2 * Q_avg.u[i]^2
+    Jx[2, 3] = γ-1
+    Jx[3, 3] = γ * Q_avg.u[i]
 end
 
-function update_local!(i, U, F, U_local, F_local)
-    for j in 1:6
-        U_local.ρ[j]  = U.ρ[i-3+j]
-        U_local.ρu[j] = U.ρu[i-3+j]
-        U_local.E[j]  = U.E[i-3+j]
-        F_local.ρ[j]  = F.ρ[i-3+j]
-        F_local.ρu[j] = F.ρu[i-3+j]
-        F_local.E[j]  = F.E[i-3+j]
+function update_xlocal!(i, j, Q, F, Q_local, F_local)
+    for k in 1:6
+        Q_local.ρ[k]  = Q.ρ[i-3+k, j]
+        Q_local.ρu[k] = Q.ρu[i-3+k, j]
+        Q_local.ρv[k] = Q.ρv[i-3+k, j]
+        Q_local.E[k]  = Q.E[i-3+k, j]
+        F_local.ρ[k]  = F.ρ[i-3+k, j]
+        F_local.ρu[k] = F.ρu[i-3+k, j]
+        F_local.ρv[k] = F.ρv[i-3+k, j]
+        F_local.E[k]  = F.E[i-3+k, j]
     end
 end
 
-function project_to_localspace!(i, U_avg, U, V, F, G)
-    for j in i-2:i+3
-        V.ρ[j]  = U_avg.L[1, 1] * U.ρ[j] + U_avg.L[1, 2] * U.ρu[j] + U_avg.L[1, 3] * U.E[j]
-        V.ρu[j] = U_avg.L[2, 1] * U.ρ[j] + U_avg.L[2, 2] * U.ρu[j] + U_avg.L[2, 3] * U.E[j]
-        V.E[j]  = U_avg.L[3, 1] * U.ρ[j] + U_avg.L[3, 2] * U.ρu[j] + U_avg.L[3, 3] * U.E[j]
-        G.ρ[j]  = U_avg.L[1, 1] * F.ρ[j] + U_avg.L[1, 2] * F.ρu[j] + U_avg.L[1, 3] * F.E[j]
-        G.ρu[j] = U_avg.L[2, 1] * F.ρ[j] + U_avg.L[2, 2] * F.ρu[j] + U_avg.L[2, 3] * F.E[j]
-        G.E[j]  = U_avg.L[3, 1] * F.ρ[j] + U_avg.L[3, 2] * F.ρu[j] + U_avg.L[3, 3] * F.E[j]
+function update_ylocal!(i, j, Q, F, Q_local, F_local)
+    for k in 1:6
+        Q_local.ρ[k]  = Q.ρ[i, j-3+k]
+        Q_local.ρu[k] = Q.ρu[i, j-3+k]
+        Q_local.ρv[k] = Q.ρv[i, j-3+k]
+        Q_local.E[k]  = Q.E[i, j-3+k]
+        F_local.ρ[k]  = F.ρ[i, j-3+k]
+        F_local.ρu[k] = F.ρu[i, j-3+k]
+        F_local.ρv[k] = F.ρv[i, j-3+k]
+        F_local.E[k]  = F.E[i, j-3+k]
     end
 end
 
-function project_to_realspace!(i, U, F, G)
-    F.ρ[i]  = U.R[1, 1] * G.ρ[i] + U.R[1, 2] * G.ρu[i] + U.R[1, 3] * G.E[i]
-    F.ρu[i] = U.R[2, 1] * G.ρ[i] + U.R[2, 2] * G.ρu[i] + U.R[2, 3] * G.E[i]
-    F.E[i]  = U.R[3, 1] * G.ρ[i] + U.R[3, 2] * G.ρu[i] + U.R[3, 3] * G.E[i]
+function project_to_localspace!(i, state, flux, flxrec)
+    Q = state.Q; Q_proj = state.Q_proj
+    F = flux.F; G = flux.G
+    L = flxrec.L 
+    for k in i-2:i+3
+        Q_proj.ρ[k]  = L[1, 1] * Q.ρ[k] + L[1, 2] * Q.ρu[k] + L[1, 3] * Q.E[k]
+        Q_proj.ρu[k] = L[2, 1] * Q.ρ[k] + L[2, 2] * Q.ρu[k] + L[2, 3] * Q.E[k]
+        Q_proj.E[k]  = L[3, 1] * Q.ρ[k] + L[3, 2] * Q.ρu[k] + L[3, 3] * Q.E[k]
+        G.ρ[k]  = L[1, 1] * F.ρ[k] + L[1, 2] * F.ρu[k] + L[1, 3] * F.E[k]
+        G.ρu[k] = L[2, 1] * F.ρ[k] + L[2, 2] * F.ρu[k] + L[2, 3] * F.E[k]
+        G.E[k]  = L[3, 1] * F.ρ[k] + L[3, 2] * F.ρu[k] + L[3, 3] * F.E[k]
+    end
 end
 
-function plot_system(U, grpar, filename)
-    x = grpar.x; cr = grpar.cr_mesh
-    plt = Plots.plot(x, U.ρ, title="1D Euler equations", label="rho")
-    Plots.plot!(x, U.u, label="u")
-    Plots.plot!(x, U.P, label="P")
+function project_to_realspace!(i, flux, flxrec)
+    F_hat = flux.F_hat; G_hat = flux.G_hat; R = flxrec.R
+    F_hat.ρ[i]  = R[1, 1] * G_hat.ρ[i] + R[1, 2] * G_hat.ρu[i] + R[1, 3] * G_hat.E[i]
+    F_hat.ρu[i] = R[2, 1] * G_hat.ρ[i] + R[2, 2] * G_hat.ρu[i] + R[2, 3] * G_hat.E[i]
+    F_hat.E[i]  = R[3, 1] * G_hat.ρ[i] + R[3, 2] * G_hat.ρu[i] + R[3, 3] * G_hat.E[i]
+end
+
+function boundary_conditions!(Q, bctype::DoubleMachReflection)
+
+end
+
+function plot_system(q, gridx, gridy, titlename, filename)
+    x = gridx.x; crx = gridx.cr_mesh; cry = gridy.cr_mesh
+    plt = Plots.contour(crx, cry, q[crx, cry], title=titlename, 
+                        fill=true, linecolor=:plasma, levels=15)
     display(plt)
     # Plots.png(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.3, t_max=1.0)
-    grpar = Weno.grid(size=512, min=-5.0, max=5.0)
-    rkpar = Weno.preallocate_rungekutta_parameters(grpar)
-    wepar = Weno.preallocate_weno_parameters(grpar)
-    U, V = preallocate_variables(grpar)
-    U_avg = preallocate_averaged_variables(grpar)
-    F, G, F_hat, G_hat = preallocate_fluxes(grpar)
-    U_local, F_local = preallocate_local()
+    gridx = Weno.grid(size=200, min=0.0, max=4.0)
+    gridy = Weno.grid(size=50, min=0.0, max=1.0)
+    rkpar = Weno.preallocate_rungekutta_parameters(gridx)
+    wepar = Weno.preallocate_weno_parameters(gridx)
+    state = preallocate_statevectors(gridx)
+    flux = preallocate_fluxes(gridx)
+    flxrec = preallocate_fluxreconstruction(gridx)
 
-    # initial condition
+    # INITIAL CONDITIONS 
+    doublemach!(state.Q, gridx, gridy)
 
-    primitive_to_conserved!(U, γ)
+    primitive_to_conserved!(state.Q, γ)
     t = 0.0; counter = 0
 
+    q = state.Q_local; f = flux.F_local
+    F̂x = flux.Fx_hat; F̂y = flux.Fy_hat
+    Ĝx = flux.Gx_hat; Ĝy = flux.Gy_hat
     while t < t_max
-        update_fluxes!(F, U)
-        wepar.ev = max_eigval(U, γ)
-        dt = CFL_condition(wepar.ev, cfl, grpar)
+        update_physical_fluxes!(flux, state.Q)
+        boundary_conditions!(state.Q, DoubleMachReflection())
+
+        wepar.ev = max_eigval(state.Q, γ)
+        dt = CFL_condition(wepar.ev, cfl, gridx)
         t += dt 
         
         # Component-wise reconstruction
-        # for i in grpar.cr_cell
-        #     update_local!(i, U, F, U_local, F_local)
-        #     F_hat.f1[i] = Weno.update_numerical_flux(U_local.ρ,  F_local.f1, wepar)
-        #     F_hat.f2[i] = Weno.update_numerical_flux(U_local.ρu, F_local.f2, wepar)
-        #     F_hat.f3[i] = Weno.update_numerical_flux(U_local.E,  F_local.f3, wepar)
-        # end
-
-        # Characteristic-wise reconstruction
-        for i in grpar.cr_cell
-            update_jacobian!(i, U, U_avg, γ, grpar)
-            Weno.diagonalize_jacobian!(U_avg, grpar)
-            project_to_localspace!(i, U_avg, U, V, F, G)
-            update_local!(i, V, G, U_local, F_local)
-            G_hat.f1[i] = Weno.update_numerical_flux(U_local.ρ,  F_local.f1, wepar)
-            G_hat.f2[i] = Weno.update_numerical_flux(U_local.ρu, F_local.f2, wepar)
-            G_hat.f3[i] = Weno.update_numerical_flux(U_local.E,  F_local.f3, wepar)
-            project_to_realspace!(i, U_avg, F_hat, G_hat)
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_xlocal!(i, j, state.Q, flux.F, q, f)
+            F̂x.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
+            F̂x.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
+            F̂x.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
+            F̂x.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_ylocal!(i, j, state.Q, flux.F, q, f)
+            F̂y.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
+            F̂y.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
+            F̂y.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
+            F̂y.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
         end
 
-        Weno.time_evolution!(U.ρ,  F_hat.f1, dt, grpar, rkpar) 
-        Weno.time_evolution!(U.ρu, F_hat.f2, dt, grpar, rkpar)
-        Weno.time_evolution!(U.E,  F_hat.f3, dt, grpar, rkpar)
+        # Characteristic-wise reconstruction
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_xjacobian!(i, j, state.Q, flxrec, γ, gridx)
+        #     Weno.diagonalize_jacobian!(flxrec)
+        #     project_to_localspace!(i, state, flux, flxrec)
+        #     update_local!(i, state.Q_proj, flux.G, q, f)
+        #     Ĝx.ρ[i]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
+        #     Ĝx.ρu[i] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
+        #     Ĝx.E[i]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
+        #     project_to_realspace!(i, flux, flxrec)
+        # end
 
-        conserved_to_primitive!(U, γ)
+        Weno.weno_scheme!(F̂x.ρ, F̂y.ρ, gridx, gridy, rkpar)
+        Weno.runge_kutta!(state.Q.ρ, dt, rkpar)
+
+        Weno.weno_scheme!(F̂x.ρu, F̂y.ρu, gridx, gridy, rkpar)
+        Weno.runge_kutta!(state.Q.ρu, dt, rkpar)
+
+        Weno.weno_scheme!(F̂x.ρv, F̂y.ρv, gridx, gridy, rkpar)
+        Weno.runge_kutta!(state.Q.ρv, dt, rkpar)
+
+        Weno.weno_scheme!(F̂x.E, F̂y.E, gridx, gridy, rkpar)
+        Weno.runge_kutta!(state.Q.E, dt, rkpar)
+
+        conserved_to_primitive!(state.Q, γ)
 
         counter += 1
         if counter % 100 == 0
@@ -240,8 +306,8 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    plot_system(U, grpar, "euler1d_shu_512")
+    plot_system(state.Q.ρ, gridx, gridy, "Mass density", "euler2d_doublemach_200x50")
 end
 
-# BenchmarkTools.@btime euler(t_max=0.14);
-@time euler(t_max=1.8)
+# BenchmarkTools.@btime euler(t_max=0.01);
+@time euler(t_max=0.01)
