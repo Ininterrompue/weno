@@ -25,28 +25,28 @@ struct Variables{T}
 end
 
 struct ConservedVariables{T}
-    ρ::Matrix{T}
-    ρu::Matrix{T}
-    ρv::Matrix{T}
-    E::Matrix{T}
+    ρ::T
+    ρu::T
+    ρv::T
+    E::T
 end
 
 struct StateVectors{T}
-    Q::Variables{T}                  # real space
-    Q_proj::ConservedVariables{T}    # characteristic space
-    Q_local::ConservedVariables{T}   # local real space
+    Q::Variables{T}                          # real space
+    Q_proj::ConservedVariables{Matrix{T}}    # characteristic space
+    Q_local::ConservedVariables{Vector{T}}   # local real space
 end
 
 struct Fluxes{T}
-    Fx::ConservedVariables{T}        # physical flux, real space
-    Fy::ConservedVariables{T}
-    Gx::ConservedVariables{T}        # physical flux, characteristic space
-    Gy::ConservedVariables{T}
-    Fx_hat::ConservedVariables{T}    # numerical flux, real space
-    Fy_hat::ConservedVariables{T}
-    Gx_hat::ConservedVariables{T}    # numerical flux, characteristic space
-    Gy_hat::ConservedVariables{T}
-    F_local::ConservedVariables{T}   # local physical flux, real space
+    Fx::ConservedVariables{Matrix{T}}        # physical flux, real space
+    Fy::ConservedVariables{Matrix{T}}
+    Gx::ConservedVariables{Matrix{T}}        # physical flux, characteristic space
+    Gy::ConservedVariables{Matrix{T}}
+    Fx_hat::ConservedVariables{Matrix{T}}    # numerical flux, real space
+    Fy_hat::ConservedVariables{Matrix{T}}
+    Gx_hat::ConservedVariables{Matrix{T}}    # numerical flux, characteristic space
+    Gy_hat::ConservedVariables{Matrix{T}}
+    F_local::ConservedVariables{Vector{T}}   # local physical flux, real space
 end
 
 mutable struct FluxReconstruction{T}
@@ -76,22 +76,27 @@ function preallocate_statevectors(gridx)
 end
 
 function preallocate_fluxes(gridx)
-    for x in [:f1, :f2, :f3, :f4, :g1, :g2, :g3, :g4]
+    for x in [:fx1, :fx2, :fx3, :fx4, :fy1, :fy2, :fy3, :fy4,
+              :gx1, :gx2, :gx3, :gx4, :gy1, :gy2, :gy3, :gy4]
         @eval $x = zeros($gridx.nx, $gridx.nx)
     end
-    for x in [:f1_hat, :f2_hat, :f3_hat, :f4_hat, 
-              :g1_hat, :g2_hat, :g3_hat, :g4_hat]
+    for x in [:fx1_hat, :fx2_hat, :fx3_hat, :fx4_hat, :fy1_hat, :fy2_hat, :fy3_hat, :fy4_hat,
+              :gx1_hat, :gx2_hat, :gx3_hat, :gx4_hat, :gy1_hat, :gy2_hat, :gy3_hat, :gy4_hat]
         @eval $x = zeros($gridx.nx+1, $gridx.nx+1)
     end
     for x in [:f1_local, :f2_local, :f3_local, :f4_local]
         @eval $x = zeros(6)
     end
-    F = ConservedVariables(f1, f2, f3, f4)
-    G = ConservedVariables(g1, g2, g3, g4)
-    F_hat = ConservedVariables(f1_hat, f2_hat, f3_hat, f4_hat)
-    G_hat = ConservedVariables(g1_hat, g2_hat, g3_hat, g4_hat)
+    Fx = ConservedVariables(fx1, fx2, fx3, fx4)
+    Fy = ConservedVariables(fy1, fy2, fy3, fy4)
+    Gx = ConservedVariables(gx1, gx2, gx3, gx4)
+    Gy = ConservedVariables(gy1, gy2, gy3, gy4)
+    Fx_hat = ConservedVariables(fx1_hat, fx2_hat, fx3_hat, fx4_hat)
+    Fy_hat = ConservedVariables(fy1_hat, fy2_hat, fy3_hat, fy4_hat)
+    Gx_hat = ConservedVariables(gx1_hat, gx2_hat, gx3_hat, gx4_hat)
+    Gy_hat = ConservedVariables(gy1_hat, gy2_hat, gy3_hat, gy4_hat)
     F_local = ConservedVariables(f1_local, f2_local, f3_local, f4_local)
-    return Fluxes(F, G, F_hat, G_hat, F_local)
+    return Fluxes(Fx, Fy, Gx, Gy, Fx_hat, Fy_hat, Gx_hat, Gy_hat, F_local)
 end
 
 function preallocate_fluxreconstruction(gridx)
@@ -105,6 +110,50 @@ function preallocate_fluxreconstruction(gridx)
     evalx = zeros(4); evaly = zeros(4)
     return FluxReconstruction(Q_avg, Jx, Jy, evalx, evaly, 
         evecLx, evecLy, evecRx, evecRy)
+end
+
+"""
+Case 6 Riemann problem
+(x, y) = [0, 1] × [0, 1], t_max = 0.3
+"""
+function case6!(Q, gridx, gridy)
+    halfx = gridx.nx ÷ 2; halfy = gridy.nx ÷ 2
+
+    Q.ρ[1:halfx, 1:halfy] .= 1.0
+    Q.u[1:halfx, 1:halfy] .= -0.75
+    Q.v[1:halfx, 1:halfy] .= 0.5
+    Q.P[1:halfx, 1:halfy] .= 1.0
+    Q.ρ[halfx+1:end, 1:halfy] .= 3.0
+    Q.u[halfx+1:end, 1:halfy] .= -0.75
+    Q.v[halfx+1:end, 1:halfy] .= -0.5
+    Q.P[halfx+1:end, 1:halfy] .= 1.0
+    Q.ρ[1:halfx, halfy+1:end] .= 2.0
+    Q.u[1:halfx, halfy+1:end] .= 0.75
+    Q.v[1:halfx, halfy+1:end] .= 0.5
+    Q.P[1:halfx, halfy+1:end] .= 1.0
+    Q.ρ[halfx+1:end, halfy+1:end] .= 1.0
+    Q.u[halfx+1:end, halfy+1:end] .= 0.75
+    Q.v[halfx+1:end, halfy+1:end] .= -0.5
+    Q.P[halfx+1:end, halfy+1:end] .= 1.0
+end
+
+"""
+Case 12 Riemann problem
+(x, y) = [0, 1] × [0, 1], t_max = 0.25
+"""
+function case12!(Q, gridx, gridy)
+    halfx = gridx.nx ÷ 2; halfy = gridy.nx ÷ 2
+
+    Q.ρ[1:halfx, 1:halfy] .= 0.8
+    Q.P[1:halfx, 1:halfy] .= 1.0
+    Q.ρ[halfx+1:end, 1:halfy] .= 1.0
+    Q.v[halfx+1:end, 1:halfy] .= 0.7276
+    Q.P[halfx+1:end, 1:halfy] .= 1.0
+    Q.ρ[1:halfx, halfy+1:end] .= 1.0
+    Q.u[1:halfx, halfy+1:end] .= 0.7276
+    Q.P[1:halfx, halfy+1:end] .= 1.0
+    Q.ρ[halfx+1:end, halfy+1:end] .= 0.5313
+    Q.P[halfx+1:end, halfy+1:end] .= 0.4
 end
 
 """
@@ -153,7 +202,7 @@ function update_physical_fluxes!(flux, Q)
     @. Fx.E  = Q.u * (Q.E + Q.P)
     @. Fy.ρ  = Q.ρv
     @. Fy.ρu = Q.ρ * Q.u * Q.v
-    @. Fy.ρv = Q.ρ * Q.v^2 + Q.Plots
+    @. Fy.ρv = Q.ρ * Q.v^2 + Q.P
     @. Fy.E  = Q.v * (Q.E + Q.P)
 end
 
@@ -224,27 +273,29 @@ function boundary_conditions!(Q, bctype::DoubleMachReflection)
 end
 
 function plot_system(q, gridx, gridy, titlename, filename)
-    x = gridx.x; crx = gridx.cr_mesh; cry = gridy.cr_mesh
-    plt = Plots.contour(crx, cry, q[crx, cry], title=titlename, 
-                        fill=true, linecolor=:plasma, levels=15)
+    crx = gridx.x[gridx.cr_mesh]; cry = gridy.x[gridy.cr_mesh]
+    plt = Plots.contour(crx, cry, q[gridx.cr_mesh, gridy.cr_mesh], title=titlename, 
+                        fill=true, linecolor=:plasma, levels=15, aspect_ratio=1)
     display(plt)
     # Plots.png(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.3, t_max=1.0)
-    gridx = Weno.grid(size=200, min=0.0, max=4.0)
-    gridy = Weno.grid(size=50, min=0.0, max=1.0)
-    rkpar = Weno.preallocate_rungekutta_parameters(gridx)
+    gridx = Weno.grid(size=256, min=0.0, max=1.0)
+    gridy = Weno.grid(size=256, min=0.0, max=1.0)
+    rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters(gridx)
     state = preallocate_statevectors(gridx)
     flux = preallocate_fluxes(gridx)
     flxrec = preallocate_fluxreconstruction(gridx)
 
     # INITIAL CONDITIONS 
-    doublemach!(state.Q, gridx, gridy)
+    # doublemach!(state.Q, gridx, gridy)
+    case6!(state.Q, gridx, gridy)
+    # case12!(state.Q, gridx, gridy)
 
     primitive_to_conserved!(state.Q, γ)
-    t = 0.0; counter = 0
+    t = 0.0; counter = 0; t0 = time()
 
     q = state.Q_local; f = flux.F_local
     F̂x = flux.Fx_hat; F̂y = flux.Fy_hat
@@ -259,14 +310,14 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
         
         # Component-wise reconstruction
         for j in gridy.cr_cell, i in gridx.cr_cell
-            update_xlocal!(i, j, state.Q, flux.F, q, f)
+            update_xlocal!(i, j, state.Q, flux.Fx, q, f)
             F̂x.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
             F̂x.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
             F̂x.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
             F̂x.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
         end
         for j in gridy.cr_cell, i in gridx.cr_cell
-            update_ylocal!(i, j, state.Q, flux.F, q, f)
+            update_ylocal!(i, j, state.Q, flux.Fy, q, f)
             F̂y.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
             F̂y.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
             F̂y.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
@@ -301,13 +352,16 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
 
         counter += 1
         if counter % 100 == 0
-            @printf("Iteration %d: t = %2.3f, dt = %2.3e\n", counter, t, dt)
+            @printf("Iteration %d: t = %2.3f, dt = %2.3e, elapsed = %3.3f\n", 
+                counter, t, dt, time() - t0)
+            # plot_system(state.Q.ρ, gridx, gridy, "Mass density", "euler2d_case12_rho_128x128")
         end
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    plot_system(state.Q.ρ, gridx, gridy, "Mass density", "euler2d_doublemach_200x50")
+    plot_system(state.Q.ρ, gridx, gridy, "Mass density", "euler2d_case12_rho_128x128")
+    plot_system(state.Q.P, gridx, gridy, "Pressure", "euler2d_case12_P_128x128")
 end
 
 # BenchmarkTools.@btime euler(t_max=0.01);
-@time euler(t_max=0.01)
+@time euler(t_max=0.3)

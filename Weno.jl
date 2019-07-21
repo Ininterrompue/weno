@@ -67,8 +67,8 @@ function preallocate_rungekutta_parameters(gridx, gridy)
 end
 
 function preallocate_weno_parameters(gridx)
-    fp = zeros(gridx.nx)
-    fm = zeros(gridx.nx)
+    fp = zeros(6)
+    fm = zeros(6)
     return WenoParameters(fp, fm, 0.0, 0.0, 0.0, 0.0, 0.0, 
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
 end
