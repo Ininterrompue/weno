@@ -9,7 +9,6 @@ include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
 
-
 struct Variables{T}
     ρ::Vector{T}    # density
     u::Vector{T}    # velocity
@@ -133,12 +132,10 @@ function conserved_to_primitive!(Q, γ)
     @. Q.P = (γ-1) * (Q.E - Q.ρu^2 / 2Q.ρ)
 end
 
-function arithmetic_average!(Q, Q_avg, gridx)
-    for i in gridx.cr_cell
-        Q_avg.ρ[i]  = 1/2 * (Q.ρ[i]  + Q.ρ[i+1])
-        Q_avg.u[i]  = 1/2 * (Q.u[i]  + Q.u[i+1])
-        Q_avg.P[i]  = 1/2 * (Q.P[i]  + Q.P[i+1])
-    end
+function arithmetic_average!(i, Q, Q_avg)
+    Q_avg.ρ[i] = 1/2 * (Q.ρ[i] + Q.ρ[i+1])
+    Q_avg.u[i] = 1/2 * (Q.u[i] + Q.u[i+1])
+    Q_avg.P[i] = 1/2 * (Q.P[i] + Q.P[i+1])
 end
 
 sound_speed(P, ρ, γ) = sqrt(γ*P/ρ)
@@ -154,19 +151,20 @@ function update_physical_fluxes!(flux, Q)
     @. F.E  = Q.u * (Q.E + Q.P)
 end
 
-
 # J is defined starting from the leftmost j-1/2.
-function update_jacobian!(i, Q, flxrec, γ, gridx)
+function update_jacobian!(i, Q, flxrec, γ)
     Q_avg = flxrec.Q_avg; J = flxrec.J
+    arithmetic_average!(i, Q, Q_avg)
 
-    arithmetic_average!(Q, Q_avg, gridx)
-    J[2, 1] = -(3-γ)/2 * Q_avg.u[i]^2
-    J[3, 1] = (γ-2)/2 * Q_avg.u[i]^3 - (Q_avg.u[i] * (γ * Q_avg.P[i] / Q_avg.ρ[i]) / (γ-1))
+    ρ = Q_avg.ρ[i]; u = Q_avg.u[i]; P = Q_avg.P[i]
+
+    J[2, 1] = -(3-γ)/2 * u^2
+    J[3, 1] = (γ-2)/2 * u^3 - (γ*P/ρ) / (γ-1) * u
     J[1, 2] = 1
-    J[2, 2] = (3-γ) * Q_avg.u[i]
-    J[3, 2] = (γ * Q_avg.P[i] / Q_avg.ρ[i]) / (γ-1) + (3-2γ)/2 * Q_avg.u[i]^2
+    J[2, 2] = (3-γ) * u
+    J[3, 2] = (γ*P/ρ) / (γ-1) + (3-2γ)/2 * u^2
     J[2, 3] = γ-1
-    J[3, 3] = γ * Q_avg.u[i]
+    J[3, 3] = γ * u
 end
 
 function update_local!(i, Q, F, Q_local, F_local)
@@ -223,7 +221,7 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
     # shu_osher!(state.Q, gridx)
 
     primitive_to_conserved!(state.Q, γ)
-    t = 0.0; counter = 0
+    t = 0.0; counter = 0; t0 = time()
 
     q = state.Q_local; f = flux.F_local
     F̂ = flux.F_hat; Ĝ = flux.G_hat
@@ -243,7 +241,7 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
 
         # Characteristic-wise reconstruction
         for i in gridx.cr_cell
-            update_jacobian!(i, state.Q, flxrec, γ, gridx)
+            update_jacobian!(i, state.Q, flxrec, γ)
             Weno.diagonalize_jacobian!(flxrec)
             project_to_localspace!(i, state, flux, flxrec)
             update_local!(i, state.Q_proj, flux.G, q, f)
@@ -266,7 +264,8 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
 
         counter += 1
         if counter % 100 == 0
-            @printf("Iteration %d: t = %2.3f, dt = %2.3e\n", counter, t, dt)
+            @printf("Iteration %d: t = %2.3f, dt = %2.3e, elapsed = %3.3f\n", 
+                counter, t, dt, time() - t0)
         end
     end
 

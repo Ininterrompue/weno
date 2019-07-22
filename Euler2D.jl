@@ -13,6 +13,7 @@ Plots.pyplot()
 
 abstract type BoundaryCondition end
 struct DoubleMachReflection <: BoundaryCondition end
+struct RiemannNatural       <: BoundaryCondition end
 
 struct Variables{T}
     ρ::Matrix{T}    # density
@@ -55,10 +56,10 @@ mutable struct FluxReconstruction{T}
     Jy::Matrix{T}
     evalx::Vector{T}      # eigenvalues
     evaly::Vector{T}
-    evecLx::Matrix{T}     # left eigenvectors
-    evecLy::Matrix{T}
-    evecRx::Matrix{T}     # right eigenvectors
-    evecRy::Matrix{T}
+    Lx::Matrix{T}         # left eigenvectors
+    Ly::Matrix{T}
+    Rx::Matrix{T}         # right eigenvectors
+    Ry::Matrix{T}
 end
 
 
@@ -179,12 +180,17 @@ function conserved_to_primitive!(Q, γ)
     @. Q.P = (γ-1) * (Q.E - (Q.ρu^2 + Q.ρv^2) / 2Q.ρ)
 end
 
-function arithmetic_average!(Q, Q_avg, gridx)
-    for i in gridx.cr_cell
-        Q_avg.ρ[i]  = 1/2 * (Q.ρ[i]  + Q.ρ[i+1])
-        Q_avg.u[i]  = 1/2 * (Q.u[i]  + Q.u[i+1])
-        Q_avg.v[i]  = 1/2 * (Q.v[i]  + Q.v[i+1])
-        Q_avg.P[i]  = 1/2 * (Q.P[i]  + Q.P[i+1])
+function arithmetic_average!(i, j, Q, Q_avg, dim)
+    if dim == :X
+        Q_avg.ρ[i, j] = 1/2 * (Q.ρ[i, j] + Q.ρ[i+1, j])
+        Q_avg.u[i, j] = 1/2 * (Q.u[i, j] + Q.u[i+1, j])
+        Q_avg.v[i, j] = 1/2 * (Q.v[i, j] + Q.v[i+1, j])
+        Q_avg.P[i, j] = 1/2 * (Q.P[i, j] + Q.P[i+1, j])
+    elseif dim == :Y
+        Q_avg.ρ[i, j] = 1/2 * (Q.ρ[i, j] + Q.ρ[i, j+1])
+        Q_avg.u[i, j] = 1/2 * (Q.u[i, j] + Q.u[i, j+1])
+        Q_avg.v[i, j] = 1/2 * (Q.v[i, j] + Q.v[i, j+1])
+        Q_avg.P[i, j] = 1/2 * (Q.P[i, j] + Q.P[i, j+1])
     end
 end
 
@@ -206,103 +212,199 @@ function update_physical_fluxes!(flux, Q)
     @. Fy.E  = Q.v * (Q.E + Q.P)
 end
 
-
 # J is defined starting from the leftmost j-1/2.
-function update_jacobian!(i, Q, flxrec, γ, gridx)
-    Q_avg = flxrec.Q_avg; Jx = flxrec.Jx
+function update_xjacobian!(i, j, Q, flxrec, γ)
+    Jx = flxrec.Jx; Q_avg = flxrec.Q_avg
+    arithmetic_average!(i, j, Q, Q_avg, :X)
 
-    arithmetic_average!(Q, Q_avg, gridx)
-    Jx[2, 1] = -(3-γ)/2 * Q_avg.u[i]^2
-    Jx[3, 1] = (γ-2)/2 * Q_avg.u[i]^3 - (Q_avg.u[i] * (γ * Q_avg.P[i] / Q_avg.ρ[i]) / (γ-1))
+    ρ = Q_avg.ρ[i, j]; u = Q_avg.u[i, j]
+    v = Q_avg.v[i, j]; P = Q_avg.P[i, j]
+
     Jx[1, 2] = 1
-    Jx[2, 2] = (3-γ) * Q_avg.u[i]
-    Jx[3, 2] = (γ * Q_avg.P[i] / Q_avg.ρ[i]) / (γ-1) + (3-2γ)/2 * Q_avg.u[i]^2
-    Jx[2, 3] = γ-1
-    Jx[3, 3] = γ * Q_avg.u[i]
+    Jx[2, 1] = -(3-γ)/2 * u^2 + (γ-1)/2 * v^2
+    Jx[2, 2] = (3-γ) * u
+    Jx[2, 3] = (1-γ) * v
+    Jx[2, 4] = γ-1
+    Jx[3, 1] = -u * v
+    Jx[3, 2] = v
+    Jx[3, 3] = u
+    Jx[4, 1] = (γ-2)/2 * u * (u^2 + v^2) - (γ*P/ρ) / (γ-1) * u
+    Jx[4, 2] = (γ*P/ρ) / (γ-1) + (3-2γ)/2 * u^2 + 1/2 * v^2
+    Jx[4, 3] = (1-γ) * u * v
+    Jx[4, 4] = γ * u
 end
 
-function update_xlocal!(i, j, Q, F, Q_local, F_local)
-    for k in 1:6
-        Q_local.ρ[k]  = Q.ρ[i-3+k, j]
-        Q_local.ρu[k] = Q.ρu[i-3+k, j]
-        Q_local.ρv[k] = Q.ρv[i-3+k, j]
-        Q_local.E[k]  = Q.E[i-3+k, j]
-        F_local.ρ[k]  = F.ρ[i-3+k, j]
-        F_local.ρu[k] = F.ρu[i-3+k, j]
-        F_local.ρv[k] = F.ρv[i-3+k, j]
-        F_local.E[k]  = F.E[i-3+k, j]
+function update_yjacobian!(i, j, Q, flxrec, γ)
+    Jy = flxrec.Jy; Q_avg = flxrec.Q_avg
+    arithmetic_average!(i, j, Q, Q_avg, :Y)
+
+    ρ = Q_avg.ρ[i, j]; u = Q_avg.u[i, j]
+    v = Q_avg.v[i, j]; P = Q_avg.P[i, j]
+
+    Jy[1, 3] = 1
+    Jy[2, 1] = -u * v
+    Jy[2, 2] = v
+    Jy[2, 3] = u
+    Jy[3, 1] = -(3-γ)/2 * v^2 + (γ-1)/2 * u^2
+    Jy[3, 2] = (1-γ) * u
+    Jy[3, 3] = (3-γ) * v
+    Jy[3, 4] = γ-1
+    Jy[4, 1] = (γ-2)/2 * v * (u^2 + v^2) - (γ*P/ρ) / (γ-1) * v
+    Jy[4, 2] = (1-γ) * u * v
+    Jy[4, 3] = (γ*P/ρ) / (γ-1) + (3-2γ)/2 * v^2 + 1/2 * u^2
+    Jy[4, 4] = γ * v
+    # @show Jy
+end
+
+function update_local!(i, j, Q, F, Q_local, F_local, dim)
+    if dim == :X
+        for k in 1:6
+            Q_local.ρ[k]  = Q.ρ[i-3+k, j]
+            Q_local.ρu[k] = Q.ρu[i-3+k, j]
+            Q_local.ρv[k] = Q.ρv[i-3+k, j]
+            Q_local.E[k]  = Q.E[i-3+k, j]
+            F_local.ρ[k]  = F.ρ[i-3+k, j]
+            F_local.ρu[k] = F.ρu[i-3+k, j]
+            F_local.ρv[k] = F.ρv[i-3+k, j]
+            F_local.E[k]  = F.E[i-3+k, j]
+        end
+    elseif dim == :Y
+        for k in 1:6
+            Q_local.ρ[k]  = Q.ρ[i, j-3+k]
+            Q_local.ρu[k] = Q.ρu[i, j-3+k]
+            Q_local.ρv[k] = Q.ρv[i, j-3+k]
+            Q_local.E[k]  = Q.E[i, j-3+k]
+            F_local.ρ[k]  = F.ρ[i, j-3+k]
+            F_local.ρu[k] = F.ρu[i, j-3+k]
+            F_local.ρv[k] = F.ρv[i, j-3+k]
+            F_local.E[k]  = F.E[i, j-3+k]
+        end
     end
 end
 
-function update_ylocal!(i, j, Q, F, Q_local, F_local)
-    for k in 1:6
-        Q_local.ρ[k]  = Q.ρ[i, j-3+k]
-        Q_local.ρu[k] = Q.ρu[i, j-3+k]
-        Q_local.ρv[k] = Q.ρv[i, j-3+k]
-        Q_local.E[k]  = Q.E[i, j-3+k]
-        F_local.ρ[k]  = F.ρ[i, j-3+k]
-        F_local.ρu[k] = F.ρu[i, j-3+k]
-        F_local.ρv[k] = F.ρv[i, j-3+k]
-        F_local.E[k]  = F.E[i, j-3+k]
-    end
-end
-
-function project_to_localspace!(i, state, flux, flxrec)
+function project_to_localspace!(i, j, state, flux, flxrec, dim)
     Q = state.Q; Q_proj = state.Q_proj
-    F = flux.F; G = flux.G
-    L = flxrec.L 
-    for k in i-2:i+3
-        Q_proj.ρ[k]  = L[1, 1] * Q.ρ[k] + L[1, 2] * Q.ρu[k] + L[1, 3] * Q.E[k]
-        Q_proj.ρu[k] = L[2, 1] * Q.ρ[k] + L[2, 2] * Q.ρu[k] + L[2, 3] * Q.E[k]
-        Q_proj.E[k]  = L[3, 1] * Q.ρ[k] + L[3, 2] * Q.ρu[k] + L[3, 3] * Q.E[k]
-        G.ρ[k]  = L[1, 1] * F.ρ[k] + L[1, 2] * F.ρu[k] + L[1, 3] * F.E[k]
-        G.ρu[k] = L[2, 1] * F.ρ[k] + L[2, 2] * F.ρu[k] + L[2, 3] * F.E[k]
-        G.E[k]  = L[3, 1] * F.ρ[k] + L[3, 2] * F.ρu[k] + L[3, 3] * F.E[k]
+
+    if dim == :X
+        F = flux.Fx; G = flux.Gx; L = flxrec.Lx
+        for k in i-2:i+3
+            Qρ = Q.ρ[k, j]; Qρu = Q.ρu[k, j]; Qρv = Q.ρv[k, j]; QE = Q.E[k, j]
+            Fρ = F.ρ[k, j]; Fρu = F.ρu[k, j]; Fρv = F.ρv[k, j]; FE = F.E[k, j]
+
+            Q_proj.ρ[k, j]  = L[1, 1] * Qρ + L[1, 2] * Qρu + L[1, 3] * Qρv + L[1, 4] * QE
+            Q_proj.ρu[k, j] = L[2, 1] * Qρ + L[2, 2] * Qρu + L[2, 3] * Qρv + L[2, 4] * QE
+            Q_proj.ρv[k, j] = L[3, 1] * Qρ + L[3, 2] * Qρu + L[3, 3] * Qρv + L[3, 4] * QE
+            Q_proj.E[k, j]  = L[4, 1] * Qρ + L[4, 2] * Qρu + L[3, 4] * Qρv + L[4, 4] * QE
+            G.ρ[k, j]  = L[1, 1] * Fρ + L[1, 2] * Fρu + L[1, 3] * Fρv + L[1, 4] * FE
+            G.ρu[k, j] = L[2, 1] * Fρ + L[2, 2] * Fρu + L[2, 3] * Fρv + L[2, 4] * FE
+            G.ρv[k, j] = L[3, 1] * Fρ + L[3, 2] * Fρu + L[3, 3] * Fρv + L[3, 4] * FE
+            G.E[k, j]  = L[4, 1] * Fρ + L[4, 2] * Fρu + L[4, 3] * Fρv + L[4, 4] * FE
+        end
+    elseif dim == :Y
+        F = flux.Fy; G = flux.Gy; L = flxrec.Ly
+        for k in j-2:j+3
+            Qρ = Q.ρ[i, k]; Qρu = Q.ρu[i, k]; Qρv = Q.ρv[i, k]; QE = Q.E[i, k]
+            Fρ = F.ρ[i, k]; Fρu = F.ρu[i, k]; Fρv = F.ρv[i, k]; FE = F.E[i, k]
+
+            Q_proj.ρ[i, k]  = L[1, 1] * Qρ + L[1, 2] * Qρu + L[1, 3] * Qρv + L[1, 4] * QE
+            Q_proj.ρu[i, k] = L[2, 1] * Qρ + L[2, 2] * Qρu + L[2, 3] * Qρv + L[2, 4] * QE
+            Q_proj.ρv[i, k] = L[3, 1] * Qρ + L[3, 2] * Qρu + L[3, 3] * Qρv + L[3, 4] * QE
+            Q_proj.E[i, k]  = L[4, 1] * Qρ + L[4, 2] * Qρu + L[3, 4] * Qρv + L[4, 4] * QE
+            G.ρ[i, k]  = L[1, 1] * Fρ + L[1, 2] * Fρu + L[1, 3] * Fρv + L[1, 4] * FE
+            G.ρu[i, k] = L[2, 1] * Fρ + L[2, 2] * Fρu + L[2, 3] * Fρv + L[2, 4] * FE
+            G.ρv[i, k] = L[3, 1] * Fρ + L[3, 2] * Fρu + L[3, 3] * Fρv + L[3, 4] * FE
+            G.E[i, k]  = L[4, 1] * Fρ + L[4, 2] * Fρu + L[4, 3] * Fρv + L[4, 4] * FE
+        end
     end
 end
 
-function project_to_realspace!(i, flux, flxrec)
-    F_hat = flux.F_hat; G_hat = flux.G_hat; R = flxrec.R
-    F_hat.ρ[i]  = R[1, 1] * G_hat.ρ[i] + R[1, 2] * G_hat.ρu[i] + R[1, 3] * G_hat.E[i]
-    F_hat.ρu[i] = R[2, 1] * G_hat.ρ[i] + R[2, 2] * G_hat.ρu[i] + R[2, 3] * G_hat.E[i]
-    F_hat.E[i]  = R[3, 1] * G_hat.ρ[i] + R[3, 2] * G_hat.ρu[i] + R[3, 3] * G_hat.E[i]
+function project_to_realspace!(i, j, flux, flxrec, dim)
+    if dim == :X
+        F̂ = flux.Fx_hat; Ĝ = flux.Gx_hat; R = flxrec.Rx
+    elseif dim == :Y
+        F̂ = flux.Fy_hat; Ĝ = flux.Gy_hat; R = flxrec.Ry
+    end
+    Ĝρ = Ĝ.ρ[i, j]; Ĝρu = Ĝ.ρu[i, j]; Ĝρv = Ĝ.ρv[i, j]; ĜE = Ĝ.E[i, j]
+
+    F̂.ρ[i, j]  = R[1, 1] * Ĝρ  + R[1, 2] * Ĝρu + R[1, 3] * Ĝρv + R[1, 4] * ĜE
+    F̂.ρu[i, j] = R[2, 1] * Ĝρ  + R[2, 2] * Ĝρu + R[2, 3] * Ĝρv + R[2, 4] * ĜE
+    F̂.ρv[i, j] = R[3, 1] * Ĝρ  + R[3, 2] * Ĝρu + R[3, 3] * Ĝρv + R[3, 4] * ĜE
+    F̂.E[i, j]  = R[4, 1] * Ĝρ  + R[4, 2] * Ĝρu + R[4, 3] * Ĝρv + R[4, 4] * ĜE
 end
 
-function boundary_conditions!(Q, bctype::DoubleMachReflection)
+function update_numerical_fluxes!(i, j, F̂, q, f, wepar)
+    F̂.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
+    F̂.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
+    F̂.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
+    F̂.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
+end
+
+function time_evolution!(F̂x, F̂y, Q, gridx, gridy, dt, rkpar)
+    Weno.weno_scheme!(F̂x.ρ, F̂y.ρ, gridx, gridy, rkpar)
+    Weno.runge_kutta!(Q.ρ, dt, rkpar)
+
+    Weno.weno_scheme!(F̂x.ρu, F̂y.ρu, gridx, gridy, rkpar)
+    Weno.runge_kutta!(Q.ρu, dt, rkpar)
+
+    Weno.weno_scheme!(F̂x.ρv, F̂y.ρv, gridx, gridy, rkpar)
+    Weno.runge_kutta!(Q.ρv, dt, rkpar)
+
+    Weno.weno_scheme!(F̂x.E, F̂y.E, gridx, gridy, rkpar)
+    Weno.runge_kutta!(Q.E, dt, rkpar)
+end
+
+"""
+Natural boundary conditions for the Riemann problems assigns the ghost points values
+that lie directly outside the boundaries.
+"""
+function boundary_conditions!(Q, gridx, gridy, bctype::RiemannNatural)
+    for n in 1:3, i in gridx.cr_mesh
+        Q.ρ[i, n]  = Q.ρ[i, 4];  Q.ρ[i, end-n+1]  = Q.ρ[i, end-3]
+        Q.ρu[i, n] = Q.ρu[i, 4]; Q.ρu[i, end-n+1] = Q.ρu[i, end-3]
+        Q.ρv[i, n] = Q.ρv[i, 4]; Q.ρv[i, end-n+1] = Q.ρv[i, end-3]
+        Q.E[i, n]  = Q.E[i, 4];  Q.E[i, end-n+1]  = Q.E[i, end-3]
+    end
+    for i in gridy.cr_mesh, n in 1:3
+        Q.ρ[n, i]  = Q.ρ[4, i];  Q.ρ[end-n+1, i]  = Q.ρ[end-3, i]
+        Q.ρu[n, i] = Q.ρu[4, i]; Q.ρu[end-n+1, i]  = Q.ρu[end-3, i]
+        Q.ρv[n, i] = Q.ρv[4, i]; Q.ρv[end-n+1, i]  = Q.ρv[end-3, i]
+        Q.E[n, i]  = Q.E[4, i];  Q.E[end-n+1, i]  = Q.E[end-3, i]
+    end
+end
+
+function boundary_conditions!(Q, gridx, gridy, bctype::DoubleMachReflection)
 
 end
 
 function plot_system(q, gridx, gridy, titlename, filename)
     crx = gridx.x[gridx.cr_mesh]; cry = gridy.x[gridy.cr_mesh]
-    plt = Plots.contour(crx, cry, q[gridx.cr_mesh, gridy.cr_mesh], title=titlename, 
-                        fill=true, linecolor=:plasma, levels=15, aspect_ratio=1)
+    q_transposed = q[gridx.cr_mesh, gridy.cr_mesh] |> transpose
+    plt = Plots.contour(cry, crx, q_transposed, title=titlename, 
+                        fill=true, linecolor=:plasma, levels=30, aspect_ratio=1)
     display(plt)
-    # Plots.png(plt, filename)
+    Plots.pdf(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.3, t_max=1.0)
-    gridx = Weno.grid(size=256, min=0.0, max=1.0)
-    gridy = Weno.grid(size=256, min=0.0, max=1.0)
+    gridx = Weno.grid(size=512, min=0.0, max=1.0)
+    gridy = Weno.grid(size=512, min=0.0, max=1.0)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters(gridx)
     state = preallocate_statevectors(gridx)
     flux = preallocate_fluxes(gridx)
     flxrec = preallocate_fluxreconstruction(gridx)
 
-    # INITIAL CONDITIONS 
     # doublemach!(state.Q, gridx, gridy)
-    case6!(state.Q, gridx, gridy)
-    # case12!(state.Q, gridx, gridy)
-
+    # case6!(state.Q, gridx, gridy)
+    case12!(state.Q, gridx, gridy)
+    
     primitive_to_conserved!(state.Q, γ)
+    boundary_conditions!(state.Q, gridx, gridy, RiemannNatural())
     t = 0.0; counter = 0; t0 = time()
 
     q = state.Q_local; f = flux.F_local
-    F̂x = flux.Fx_hat; F̂y = flux.Fy_hat
-    Ĝx = flux.Gx_hat; Ĝy = flux.Gy_hat
     while t < t_max
         update_physical_fluxes!(flux, state.Q)
-        boundary_conditions!(state.Q, DoubleMachReflection())
 
         wepar.ev = max_eigval(state.Q, γ)
         dt = CFL_condition(wepar.ev, cfl, gridx)
@@ -310,44 +412,36 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
         
         # Component-wise reconstruction
         for j in gridy.cr_cell, i in gridx.cr_cell
-            update_xlocal!(i, j, state.Q, flux.Fx, q, f)
-            F̂x.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
-            F̂x.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
-            F̂x.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
-            F̂x.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
+            update_local!(i, j, state.Q, flux.Fx, q, f, :X)
+            update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, wepar)
         end
         for j in gridy.cr_cell, i in gridx.cr_cell
-            update_ylocal!(i, j, state.Q, flux.Fy, q, f)
-            F̂y.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
-            F̂y.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
-            F̂y.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
-            F̂y.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
+            update_local!(i, j, state.Q, flux.Fy, q, f, :Y)
+            update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, wepar)
         end
 
         # Characteristic-wise reconstruction
         # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_xjacobian!(i, j, state.Q, flxrec, γ, gridx)
-        #     Weno.diagonalize_jacobian!(flxrec)
-        #     project_to_localspace!(i, state, flux, flxrec)
-        #     update_local!(i, state.Q_proj, flux.G, q, f)
-        #     Ĝx.ρ[i]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
-        #     Ĝx.ρu[i] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
-        #     Ĝx.E[i]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
-        #     project_to_realspace!(i, flux, flxrec)
+        #     update_xjacobian!(i, j, state.Q, flxrec, γ)
+        #     Weno.diagonalize_jacobian!(flxrec, :X)
+        #     project_to_localspace!(i, j, state, flux, flxrec, :X)
+        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, :X)
+        #     update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, wepar)
+        #     project_to_realspace!(i, j, flux, flxrec, :X)
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     # @printf("%d  %d\n", i, j)
+
+        #     update_yjacobian!(i, j, state.Q, flxrec, γ)
+        #     Weno.diagonalize_jacobian!(flxrec, :Y)
+        #     project_to_localspace!(i, j, state, flux, flxrec, :Y)
+        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, :Y)
+        #     update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, wepar)
+        #     project_to_realspace!(i, j, flux, flxrec, :Y)
         # end
 
-        Weno.weno_scheme!(F̂x.ρ, F̂y.ρ, gridx, gridy, rkpar)
-        Weno.runge_kutta!(state.Q.ρ, dt, rkpar)
-
-        Weno.weno_scheme!(F̂x.ρu, F̂y.ρu, gridx, gridy, rkpar)
-        Weno.runge_kutta!(state.Q.ρu, dt, rkpar)
-
-        Weno.weno_scheme!(F̂x.ρv, F̂y.ρv, gridx, gridy, rkpar)
-        Weno.runge_kutta!(state.Q.ρv, dt, rkpar)
-
-        Weno.weno_scheme!(F̂x.E, F̂y.E, gridx, gridy, rkpar)
-        Weno.runge_kutta!(state.Q.E, dt, rkpar)
-
+        time_evolution!(flux.Fx_hat, flux.Fy_hat, state.Q, gridx, gridy, dt, rkpar)
+        boundary_conditions!(state.Q, gridx, gridy, RiemannNatural())
         conserved_to_primitive!(state.Q, γ)
 
         counter += 1
@@ -359,9 +453,9 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
     end
 
     @printf("%d iterations. t_max = %2.3f.\n", counter, t)
-    plot_system(state.Q.ρ, gridx, gridy, "Mass density", "euler2d_case12_rho_128x128")
-    plot_system(state.Q.P, gridx, gridy, "Pressure", "euler2d_case12_P_128x128")
+    plot_system(state.Q.ρ, gridx, gridy, "Mass density", "case12_rho_512x512")
+    plot_system(state.Q.P, gridx, gridy, "Pressure", "case12_P_512x512")
 end
 
 # BenchmarkTools.@btime euler(t_max=0.01);
-@time euler(t_max=0.3)
+@time euler(t_max=0.25)

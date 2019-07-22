@@ -73,10 +73,28 @@ function preallocate_weno_parameters(gridx)
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
 end
 
-# Need to figure out a way to bypass the inv()
+# Need to figure out a way to bypass the inv().
+# LAPACK.geev!('V', 'V', J) gives wrong results...
 function diagonalize_jacobian!(flxrec)
     flxrec.eval, flxrec.R = eigen(flxrec.J)
     flxrec.L = inv(flxrec.R)
+end
+
+function diagonalize_jacobian!(flxrec, dim)
+    if dim == :X
+        eval, evecR = eigen(flxrec.Jx)
+        @. flxrec.evalx = eval |> real
+        @. flxrec.Rx = evecR |> real
+        # flxrec.evalx, flxrec.Rx = eigen(flxrec.Jx)
+        flxrec.Lx = inv(flxrec.Rx)
+    elseif dim == :Y
+        eval, evecR = eigen(flxrec.Jy)
+        # @show evecR
+        @. flxrec.evaly = eval |> real
+        @. flxrec.Ry = evecR |> real
+        # flxrec.evaly, flxrec.Ry = eigen(flxrec.Jy)
+        flxrec.Ly = inv(flxrec.Ry)
+    end
 end
 
 function runge_kutta!(u, dt, rkpar)
