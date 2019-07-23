@@ -1,8 +1,8 @@
 ## Overview
 
-This repository seeks to make use of the weighted essentially non-oscillatory (WENO) finite-difference schemes<sup>1,2</sup> to solve nonlinear hyperbolic PDEs. Our short-term goals are to implement the AdaWENO scheme<sup>3</sup> which aims to reduce the computational expense of local characteristic decomposition, as well as solve systems with source terms<sup>4</sup>.
+This repository seeks to make use of the weighted essentially non-oscillatory (WENO) finite-difference schemes<sup>1,2</sup> to solve nonlinear hyperbolic PDEs. Our short-term goals are to generalize the AdaWENO scheme<sup>3</sup> to other systems, as well as solve systems with source terms<sup>4</sup>.
 
-We use the 3rd order TVD Runge-Kutta method for the temporal discretization and the 5th order WENO scheme for the spatial discretization<sup>5</sup>. The nonlinear weights are calculated using smoothness indicators defined by Yamaleev and Carpenter<sup>6</sup>, which improves upon the accuracy of the scheme at shocks and discontinuous points.
+We use the 3rd order TVD Runge-Kutta method for the temporal discretization and the 5th order WENO scheme for the spatial discretization<sup>5</sup>. The nonlinear weights are calculated using smoothness indicators defined by Yamaleev and Carpenter<sup>6</sup>, which improves upon the accuracy of the scheme at shocks and discontinuous points as compared with those weights defined in Ref. 2.
 
 We have written solvers for Burgers' equation and the Euler equations in 1D and 2D. The following extensions are proposed: shallow water equations<sup>7</sup>, ideal MHD<sup>8</sup> in 1D and 2D.
 

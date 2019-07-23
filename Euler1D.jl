@@ -303,9 +303,9 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
                 Weno.diagonalize_jacobian!(flxrec)
                 project_to_localspace!(i, state, flux, flxrec)
                 update_local!(i, state.Q_proj, flux.G, q, f)
-                Ĝ.ρ[i]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar, ada=true)
-                Ĝ.ρu[i] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar, ada=true)
-                Ĝ.E[i]  = Weno.update_numerical_flux(q.E,  f.E,  wepar, ada=true)
+                Ĝ.ρ[i]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar, ada=false)
+                Ĝ.ρu[i] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar, ada=false)
+                Ĝ.E[i]  = Weno.update_numerical_flux(q.E,  f.E,  wepar, ada=false)
                 project_to_realspace!(i, flux, flxrec)
             end
         end
@@ -322,7 +322,7 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
 
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
-    plot_system(state.Q, gridx, "euler1d_shu_512")
+    # plot_system(state.Q, gridx, "euler1d_shu_512")
 end
 
 # BenchmarkTools.@btime euler(t_max=0.13);
