@@ -382,12 +382,12 @@ function plot_system(q, gridx, gridy, titlename, filename)
     plt = Plots.contour(cry, crx, q_transposed, title=titlename, 
                         fill=true, linecolor=:plasma, levels=30, aspect_ratio=1)
     display(plt)
-    Plots.pdf(plt, filename)
+    # Plots.pdf(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.3, t_max=1.0)
-    gridx = Weno.grid(size=512, min=0.0, max=1.0)
-    gridy = Weno.grid(size=512, min=0.0, max=1.0)
+    gridx = Weno.grid(size=64, min=0.0, max=1.0)
+    gridy = Weno.grid(size=64, min=0.0, max=1.0)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters(gridx)
     state = preallocate_statevectors(gridx)
@@ -411,41 +411,41 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
         t += dt 
         
         # Component-wise reconstruction
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_local!(i, j, state.Q, flux.Fx, q, f, :X)
-            update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, wepar)
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_local!(i, j, state.Q, flux.Fy, q, f, :Y)
-            update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, wepar)
-        end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local!(i, j, state.Q, flux.Fx, q, f, :X)
+        #     update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, wepar)
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local!(i, j, state.Q, flux.Fy, q, f, :Y)
+        #     update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, wepar)
+        # end
 
         # Characteristic-wise reconstruction
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_xjacobian!(i, j, state.Q, flxrec, γ)
-        #     Weno.diagonalize_jacobian!(flxrec, :X)
-        #     project_to_localspace!(i, j, state, flux, flxrec, :X)
-        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, :X)
-        #     update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, wepar)
-        #     project_to_realspace!(i, j, flux, flxrec, :X)
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     # @printf("%d  %d\n", i, j)
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_xjacobian!(i, j, state.Q, flxrec, γ)
+            Weno.diagonalize_jacobian!(flxrec, :X)
+            project_to_localspace!(i, j, state, flux, flxrec, :X)
+            update_local!(i, j, state.Q_proj, flux.Gx, q, f, :X)
+            update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, wepar)
+            project_to_realspace!(i, j, flux, flxrec, :X)
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            # @printf("%d  %d\n", i, j)
 
-        #     update_yjacobian!(i, j, state.Q, flxrec, γ)
-        #     Weno.diagonalize_jacobian!(flxrec, :Y)
-        #     project_to_localspace!(i, j, state, flux, flxrec, :Y)
-        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, :Y)
-        #     update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, wepar)
-        #     project_to_realspace!(i, j, flux, flxrec, :Y)
-        # end
+            update_yjacobian!(i, j, state.Q, flxrec, γ)
+            Weno.diagonalize_jacobian!(flxrec, :Y)
+            project_to_localspace!(i, j, state, flux, flxrec, :Y)
+            update_local!(i, j, state.Q_proj, flux.Gy, q, f, :Y)
+            update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, wepar)
+            project_to_realspace!(i, j, flux, flxrec, :Y)
+        end
 
         time_evolution!(flux.Fx_hat, flux.Fy_hat, state.Q, gridx, gridy, dt, rkpar)
         boundary_conditions!(state.Q, gridx, gridy, RiemannNatural())
         conserved_to_primitive!(state.Q, γ)
 
         counter += 1
-        if counter % 100 == 0
+        if counter % 50 == 0
             @printf("Iteration %d: t = %2.3f, dt = %2.3e, elapsed = %3.3f\n", 
                 counter, t, dt, time() - t0)
             # plot_system(state.Q.ρ, gridx, gridy, "Mass density", "euler2d_case12_rho_128x128")

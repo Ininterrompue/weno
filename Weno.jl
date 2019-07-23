@@ -1,6 +1,7 @@
 module Weno
 
 export grid, diagonalize_jacobian!, update_numerical_flux
+export nonlinear_weights_plus!, nonlinear_weights_minus!, update_switches!
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 export weno_scheme!, runge_kutta!
 
@@ -26,19 +27,34 @@ mutable struct WenoParameters{T}
     fp::Vector{T}
     fm::Vector{T}
     ev::T
-    fhat0::T
-    fhat1::T
-    fhat2::T
-    w0::T
-    w1::T
-    w2::T
-    IS0::T
-    IS1::T
-    IS2::T
-    α0::T
-    α1::T
-    α2::T
-    τ::T
+    fhat0p::T
+    fhat1p::T
+    fhat2p::T
+    fhat0m::T
+    fhat1m::T
+    fhat2m::T
+    w0p::T
+    w1p::T
+    w2p::T
+    w0m::T
+    w1m::T
+    w2m::T
+    β0p::T
+    β1p::T
+    β2p::T
+    β0m::T
+    β1m::T
+    β2m::T
+    α0p::T
+    α1p::T
+    α2p::T
+    α0m::T
+    α1m::T
+    α2m::T
+    τp::T
+    τm::T
+    θp::T
+    θm::T
     ϵ::T
 end
 
@@ -69,8 +85,12 @@ end
 function preallocate_weno_parameters(gridx)
     fp = zeros(6)
     fm = zeros(6)
-    return WenoParameters(fp, fm, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6)
+    return WenoParameters(fp, fm, 0.0,   # ev
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,    # f_hat
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,    # ω
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,    # β
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,    # α
+        0.0, 0.0, 0.0, 0.0, 1e-6)        # τ, θ, ϵ
 end
 
 # Need to figure out a way to bypass the inv().
@@ -83,18 +103,25 @@ end
 function diagonalize_jacobian!(flxrec, dim)
     if dim == :X
         eval, evecR = eigen(flxrec.Jx)
+        evecL = inv(evecR)
         @. flxrec.evalx = eval |> real
         @. flxrec.Rx = evecR |> real
         # flxrec.evalx, flxrec.Rx = eigen(flxrec.Jx)
-        flxrec.Lx = inv(flxrec.Rx)
+        @. flxrec.Lx = flxrec.Lx |> real
     elseif dim == :Y
         eval, evecR = eigen(flxrec.Jy)
+        evecL = inv(evecR)
         # @show evecR
         @. flxrec.evaly = eval |> real
         @. flxrec.Ry = evecR |> real
+        @. flxrec.Ly = flxrec.Ly |> real
         # flxrec.evaly, flxrec.Ry = eigen(flxrec.Jy)
-        flxrec.Ly = inv(flxrec.Ry)
     end
+end
+
+function update_switches!(w)
+    w.θp = 1 / (1 + (w.α0p + w.α1p + w.α2p - 1)^2)
+    w.θm = 1 / (1 + (w.α0m + w.α1m + w.α2m - 1)^2)
 end
 
 function runge_kutta!(u, dt, rkpar)
@@ -122,68 +149,68 @@ end
 fplus(u, f, ev)  = 1/2 * (f + ev * u)
 fminus(u, f, ev) = 1/2 * (f - ev * u)
 
-function update_numerical_flux(u, f, w)
-    for i in eachindex(u)
-        w.fp[i] = fplus(u[i], f[i], w.ev)
-        w.fm[i] = fminus(u[i], f[i], w.ev)
-    end
-    return fhat(:+, w) + fhat(:-, w)
+function update_numerical_flux(u, f, w; ada)
+    @. w.fp = fplus(u, f, w.ev)
+    @. w.fm = fminus(u, f, w.ev)
+    return fhatp(w, ada) + fhatm(w, ada)
 end
 
-function fhat(flux_sign, w)
-    fp = w.fp; fm = w.fm
+function fhatp(w, ada)
+    w.fhat0p =  1/3 * w.fp[1] - 7/6 * w.fp[2] + 11/6 * w.fp[3]
+    w.fhat1p = -1/6 * w.fp[2] + 5/6 * w.fp[3] +  1/3 * w.fp[4]
+    w.fhat2p =  1/3 * w.fp[3] + 5/6 * w.fp[4] -  1/6 * w.fp[5]
 
-    if flux_sign == :+
-        w.fhat0 =  1/3 * fp[1] - 7/6 * fp[2] + 11/6 * fp[3]
-        w.fhat1 = -1/6 * fp[2] + 5/6 * fp[3] +  1/3 * fp[4]
-        w.fhat2 =  1/3 * fp[3] + 5/6 * fp[4] -  1/6 * fp[5]
-    elseif flux_sign == :-
-        w.fhat0 =  1/3 * fm[4] + 5/6 * fm[3] -  1/6 * fm[2]
-        w.fhat1 = -1/6 * fm[5] + 5/6 * fm[4] +  1/3 * fm[3]
-        w.fhat2 =  1/3 * fm[6] - 7/6 * fm[5] + 11/6 * fm[4]
-    end
-
-    nonlinear_weights!(flux_sign, w)
-    return w.w0 * w.fhat0 + w.w1 * w.fhat1 + w.w2 * w.fhat2
+    if ada == false nonlinear_weights_plus!(w) end
+    return w.w0p * w.fhat0p + w.w1p * w.fhat1p + w.w2p * w.fhat2p
 end
 
-function nonlinear_weights!(flux_sign, w)
-    fp = w.fp; fm = w.fm
+function fhatm(w, ada)
+    w.fhat0m =  1/3 * w.fm[4] + 5/6 * w.fm[3] -  1/6 * w.fm[2]
+    w.fhat1m = -1/6 * w.fm[5] + 5/6 * w.fm[4] +  1/3 * w.fm[3]
+    w.fhat2m =  1/3 * w.fm[6] - 7/6 * w.fm[5] + 11/6 * w.fm[4]
 
-    if flux_sign == :+
-        w.IS0 = 13/12 * (fp[1] - 2fp[2] + fp[3])^2 + 1/4 * (fp[1] - 4fp[2] + 3fp[3])^2
-        w.IS1 = 13/12 * (fp[2] - 2fp[3] + fp[4])^2 + 1/4 * (fp[2] - fp[4])^2
-        w.IS2 = 13/12 * (fp[3] - 2fp[4] + fp[5])^2 + 1/4 * (3fp[3] - 4fp[4] + fp[5])^2
+    if ada == false nonlinear_weights_minus!(w) end
+    return w.w0m * w.fhat0m + w.w1m * w.fhat1m + w.w2m * w.fhat2m
+end
 
-        # Yamaleev and Carpenter, 2009
-        w.τ = (fp[1] - 4fp[2] + 6fp[3] - 4fp[4] + fp[5])^2
-        w.α0 = 1/10 * (1 + (w.τ / (w.ϵ + w.IS0))^2)
-        w.α1 = 6/10 * (1 + (w.τ / (w.ϵ + w.IS1))^2)
-        w.α2 = 3/10 * (1 + (w.τ / (w.ϵ + w.IS2))^2)
+function nonlinear_weights_plus!(w)
+    w.β0p = 13/12 * (w.fp[1] - 2w.fp[2] + w.fp[3])^2 + 1/4 * (w.fp[1] - 4w.fp[2] + 3w.fp[3])^2
+    w.β1p = 13/12 * (w.fp[2] - 2w.fp[3] + w.fp[4])^2 + 1/4 * (w.fp[2] - w.fp[4])^2
+    w.β2p = 13/12 * (w.fp[3] - 2w.fp[4] + w.fp[5])^2 + 1/4 * (3w.fp[3] - 4w.fp[4] + w.fp[5])^2
 
-        # Jiang and Shu, 1997
-        # w.α0 = 1/10 / (w.ϵ + w.IS0)^2
-        # w.α1 = 6/10 / (w.ϵ + w.IS1)^2
-        # w.α2 = 3/10 / (w.ϵ + w.IS2)^2
+    # Yamaleev and Carpenter, 2009
+    w.τp = (w.fp[1] - 4w.fp[2] + 6w.fp[3] - 4w.fp[4] + w.fp[5])^2
+    w.α0p = 1/10 * (1 + (w.τp / (w.ϵ + w.β0p))^2)
+    w.α1p = 6/10 * (1 + (w.τp / (w.ϵ + w.β1p))^2)
+    w.α2p = 3/10 * (1 + (w.τp / (w.ϵ + w.β2p))^2)
 
-    elseif flux_sign == :-
-        w.IS0 = 13/12 * (fm[2] - 2fm[3] + fm[4])^2 + 1/4 * (fm[2] - 4fm[3] + 3fm[4])^2
-        w.IS1 = 13/12 * (fm[3] - 2fm[4] + fm[5])^2 + 1/4 * (fm[3] - fm[5])^2
-        w.IS2 = 13/12 * (fm[4] - 2fm[5] + fm[6])^2 + 1/4 * (3fm[4] - 4fm[5] + fm[6])^2
+    # Jiang and Shu, 1997
+    # w.α0p = 1/10 / (w.ϵ + w.β0p)^2
+    # w.α1p = 6/10 / (w.ϵ + w.β1p)^2
+    # w.α2p = 3/10 / (w.ϵ + w.β2p)^2
 
-        w.τ = (fm[2] - 4fm[3] + 6fm[4] - 4fm[5] + fm[6])^2
-        w.α0 = 3/10 * (1 + (w.τ / (w.ϵ + w.IS0))^2)
-        w.α1 = 6/10 * (1 + (w.τ / (w.ϵ + w.IS1))^2)
-        w.α2 = 1/10 * (1 + (w.τ / (w.ϵ + w.IS2))^2)
+    w.w0p = w.α0p / (w.α0p + w.α1p + w.α2p)
+    w.w1p = w.α1p / (w.α0p + w.α1p + w.α2p)
+    w.w2p = w.α2p / (w.α0p + w.α1p + w.α2p)
+end
 
-        # w.α0 = 3/10 / (w.ϵ + w.IS0)^2
-        # w.α1 = 6/10 / (w.ϵ + w.IS1)^2
-        # w.α2 = 1/10 / (w.ϵ + w.IS2)^2
-    end
+function nonlinear_weights_minus!(w)
+    w.β0m = 13/12 * (w.fm[2] - 2w.fm[3] + w.fm[4])^2 + 1/4 * (w.fm[2] - 4w.fm[3] + 3w.fm[4])^2
+    w.β1m = 13/12 * (w.fm[3] - 2w.fm[4] + w.fm[5])^2 + 1/4 * (w.fm[3] - w.fm[5])^2
+    w.β2m = 13/12 * (w.fm[4] - 2w.fm[5] + w.fm[6])^2 + 1/4 * (3w.fm[4] - 4w.fm[5] + w.fm[6])^2
 
-    w.w0 = w.α0 / (w.α0 + w.α1 + w.α2)
-    w.w1 = w.α1 / (w.α0 + w.α1 + w.α2)
-    w.w2 = w.α2 / (w.α0 + w.α1 + w.α2)
+    w.τm = (w.fm[2] - 4w.fm[3] + 6w.fm[4] - 4w.fm[5] + w.fm[6])^2
+    w.α0m = 3/10 * (1 + (w.τm / (w.ϵ + w.β0m))^2)
+    w.α1m = 6/10 * (1 + (w.τm / (w.ϵ + w.β1m))^2)
+    w.α2m = 1/10 * (1 + (w.τm / (w.ϵ + w.β2m))^2)
+
+    # w.α0m = 3/10 / (w.ϵ + w.IS0)^2
+    # w.α1m = 6/10 / (w.ϵ + w.IS1)^2
+    # w.α2m = 1/10 / (w.ϵ + w.IS2)^2
+
+    w.w0m = w.α0m / (w.α0m + w.α1m + w.α2m)
+    w.w1m = w.α1m / (w.α0m + w.α1m + w.α2m)
+    w.w2m = w.α2m / (w.α0m + w.α1m + w.α2m)
 end
 
 end
