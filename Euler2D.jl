@@ -62,6 +62,11 @@ mutable struct FluxReconstruction{T}
     Ry::Matrix{T}
 end
 
+struct SmoothnessFunctions{T}
+    G₊::Matrix{T}
+    G₋::Matrix{T}
+end
+
 
 function preallocate_statevectors(gridx)
     for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E, :ρ2, :ρu2, :ρv2, :E2]
@@ -111,6 +116,12 @@ function preallocate_fluxreconstruction(gridx)
     evalx = zeros(4); evaly = zeros(4)
     return FluxReconstruction(Q_avg, Jx, Jy, evalx, evaly, 
         evecLx, evecLy, evecRx, evecRy)
+end
+
+function preallocate_smoothnessfunctions(gridx)
+    G₊ = zeros(gridx.nx, gridx.nx)
+    G₋ = zeros(gridx.nx, gridx.nx)
+    return SmoothnessFunctions(G₊, G₋)
 end
 
 """
@@ -212,6 +223,11 @@ function update_physical_fluxes!(flux, Q)
     @. Fy.E  = Q.v * (Q.E + Q.P)
 end
 
+function update_smoothnessfunctions!(smooth, Q, α)
+    @. smooth.G₊ = Q.ρ + Q.ρ * (Q.u^2 + Q.v^2) + Q.P + α * Q.ρ * (Q.u + Q.v)
+    @. smooth.G₋ = Q.ρ + Q.ρ * (Q.u^2 + Q.v^2) + Q.P - α * Q.ρ * (Q.u + Q.v)
+end
+
 # J is defined starting from the leftmost j-1/2.
 function update_xjacobian!(i, j, Q, flxrec, γ)
     Jx = flxrec.Jx; Q_avg = flxrec.Q_avg
@@ -282,6 +298,20 @@ function update_local!(i, j, Q, F, Q_local, F_local, dim)
     end
 end
 
+function update_local_smoothnessfunctions!(i, j, smooth, w, dim)
+    if dim == :X
+        for k in 1:6
+            w.fp[k] = smooth.G₊[i-3+k, j]
+            w.fm[k] = smooth.G₋[i-3+k, j]
+        end
+    elseif dim == :Y
+        for k in 1:6
+            w.fp[k] = smooth.G₊[i, j-3+k]
+            w.fm[k] = smooth.G₋[i, j-3+k]
+        end
+    end
+end
+
 function project_to_localspace!(i, j, state, flux, flxrec, dim)
     Q = state.Q; Q_proj = state.Q_proj
 
@@ -332,11 +362,11 @@ function project_to_realspace!(i, j, flux, flxrec, dim)
     F̂.E[i, j]  = R[4, 1] * Ĝρ  + R[4, 2] * Ĝρu + R[4, 3] * Ĝρv + R[4, 4] * ĜE
 end
 
-function update_numerical_fluxes!(i, j, F̂, q, f, wepar)
-    F̂.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar)
-    F̂.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar)
-    F̂.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar)
-    F̂.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar)
+function update_numerical_fluxes!(i, j, F̂, q, f, wepar, ada)
+    F̂.ρ[i, j]  = Weno.update_numerical_flux(q.ρ,  f.ρ,  wepar, ada)
+    F̂.ρu[i, j] = Weno.update_numerical_flux(q.ρu, f.ρu, wepar, ada)
+    F̂.ρv[i, j] = Weno.update_numerical_flux(q.ρv, f.ρv, wepar, ada)
+    F̂.E[i, j]  = Weno.update_numerical_flux(q.E,  f.E,  wepar, ada)
 end
 
 function time_evolution!(F̂x, F̂y, Q, gridx, gridy, dt, rkpar)
@@ -393,6 +423,7 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
     state = preallocate_statevectors(gridx)
     flux = preallocate_fluxes(gridx)
     flxrec = preallocate_fluxreconstruction(gridx)
+    smooth = preallocate_smoothnessfunctions(gridx)
 
     # doublemach!(state.Q, gridx, gridy)
     # case6!(state.Q, gridx, gridy)
@@ -411,34 +442,69 @@ function euler(; γ=7/5, cfl=0.3, t_max=1.0)
         t += dt 
         
         # Component-wise reconstruction
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local!(i, j, state.Q, flux.Fx, q, f, :X)
-        #     update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, wepar)
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local!(i, j, state.Q, flux.Fy, q, f, :Y)
-        #     update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, wepar)
-        # end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local!(i, j, state.Q, flux.Fx, q, f, :X)
+            update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, wepar, false)
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local!(i, j, state.Q, flux.Fy, q, f, :Y)
+            update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, wepar, false)
+        end
 
         # Characteristic-wise reconstruction
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_xjacobian!(i, j, state.Q, flxrec, γ)
-            Weno.diagonalize_jacobian!(flxrec, :X)
-            project_to_localspace!(i, j, state, flux, flxrec, :X)
-            update_local!(i, j, state.Q_proj, flux.Gx, q, f, :X)
-            update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, wepar)
-            project_to_realspace!(i, j, flux, flxrec, :X)
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            # @printf("%d  %d\n", i, j)
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_xjacobian!(i, j, state.Q, flxrec, γ)
+        #     Weno.diagonalize_jacobian!(flxrec, :X)
+        #     project_to_localspace!(i, j, state, flux, flxrec, :X)
+        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, :X)
+        #     update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, wepar, false)
+        #     project_to_realspace!(i, j, flux, flxrec, :X)
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_yjacobian!(i, j, state.Q, flxrec, γ)
+        #     Weno.diagonalize_jacobian!(flxrec, :Y)
+        #     project_to_localspace!(i, j, state, flux, flxrec, :Y)
+        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, :Y)
+        #     update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, wepar, false)
+        #     project_to_realspace!(i, j, flux, flxrec, :Y)
+        # end
 
-            update_yjacobian!(i, j, state.Q, flxrec, γ)
-            Weno.diagonalize_jacobian!(flxrec, :Y)
-            project_to_localspace!(i, j, state, flux, flxrec, :Y)
-            update_local!(i, j, state.Q_proj, flux.Gy, q, f, :Y)
-            update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, wepar)
-            project_to_realspace!(i, j, flux, flxrec, :Y)
-        end
+        # AdaWENO scheme
+        # update_smoothnessfunctions!(smooth, state.Q, wepar.ev)
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
+        #     Weno.nonlinear_weights_plus!(wepar)
+        #     Weno.nonlinear_weights_minus!(wepar)
+        #     Weno.update_switches!(wepar)
+        #     if wepar.θp > 0.5 && wepar.θm > 0.5
+        #         update_local!(i, j, state.Q, flux.Fx, q, f, :X)
+        #         update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, wepar, true)
+        #     else
+        #         update_xjacobian!(i, j, state.Q, flxrec, γ)
+        #         Weno.diagonalize_jacobian!(flxrec, :X)
+        #         project_to_localspace!(i, j, state, flux, flxrec, :X)
+        #         update_local!(i, j, state.Q_proj, flux.Gx, q, f, :X)
+        #         update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, wepar, false)
+        #         project_to_realspace!(i, j, flux, flxrec, :X)
+        #     end
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
+        #     Weno.nonlinear_weights_plus!(wepar)
+        #     Weno.nonlinear_weights_minus!(wepar)
+        #     Weno.update_switches!(wepar)
+        #     if wepar.θp > 0.5 && wepar.θm > 0.5
+        #         update_local!(i, j, state.Q, flux.Fy, q, f, :Y)
+        #         update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, wepar, true)
+        #     else
+        #         update_xjacobian!(i, j, state.Q, flxrec, γ)
+        #         Weno.diagonalize_jacobian!(flxrec, :Y)
+        #         project_to_localspace!(i, j, state, flux, flxrec, :Y)
+        #         update_local!(i, j, state.Q_proj, flux.Gy, q, f, :Y)
+        #         update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, wepar, false)
+        #         project_to_realspace!(i, j, flux, flxrec, :Y)
+        #     end
+        # end
 
         time_evolution!(flux.Fx_hat, flux.Fy_hat, state.Q, gridx, gridy, dt, rkpar)
         boundary_conditions!(state.Q, gridx, gridy, RiemannNatural())

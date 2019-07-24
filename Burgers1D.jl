@@ -59,7 +59,7 @@ function burgers(; cfl=0.3, t_max=1.0)
         wepar.ev = maximum(u)
         for i in gridx.cr_cell
             update_local!(i, u, f, u_local, f_local)
-            f_hat[i] = Weno.update_numerical_flux(u_local, f_local, wepar)
+            f_hat[i] = Weno.update_numerical_flux(u_local, f_local, wepar, false)
         end
         Weno.weno_scheme!(f_hat, gridx, rkpar)
         Weno.runge_kutta!(u, dt, rkpar)

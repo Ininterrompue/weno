@@ -149,7 +149,7 @@ end
 fplus(u, f, ev)  = 1/2 * (f + ev * u)
 fminus(u, f, ev) = 1/2 * (f - ev * u)
 
-function update_numerical_flux(u, f, w; ada)
+function update_numerical_flux(u, f, w, ada)
     @. w.fp = fplus(u, f, w.ev)
     @. w.fm = fminus(u, f, w.ev)
     return fhatp(w, ada) + fhatm(w, ada)
