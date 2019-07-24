@@ -4,7 +4,7 @@ This repository seeks to make use of the weighted essentially non-oscillatory (W
 
 We use the 3rd order TVD Runge-Kutta method for the temporal discretization and the 5th order WENO scheme for the spatial discretization<sup>5</sup>. The nonlinear weights are calculated using smoothness indicators defined by Yamaleev and Carpenter<sup>6</sup>, which improves upon the accuracy of the scheme at shocks and discontinuous points as compared with those weights defined in Jiang and Shu<sup>2</sup>.
 
-We have written solvers for Burgers' equation and the Euler equations in 1D and 2D. The following extensions are proposed: shallow water equations<sup>7</sup>, ideal MHD<sup>8,9</sup>, Hall MHD<sup>10</sup>.
+We have written solvers for Burgers' equation and the Euler equations in 1D and 2D. The following extensions are proposed: shallow water equations<sup>7</sup>, ideal MHD<sup>8</sup>, Hall MHD<sup>9</sup>, curvilinear coordinates<sup>10</sup>.
 
 ## References
 1. X. D. Liu, S. Osher, and T. Chan, *J. Comput. Phys.* **115**:200-212 (1994).
@@ -15,5 +15,6 @@ We have written solvers for Burgers' equation and the Euler equations in 1D and 
 6. N. K. Yamaleev and M. H. Carpenter, *J. Comput. Phys.* **228**(11):4248-4272 (2009).
 7. Y. Xing and C. W. Shu, *J. Comput. Phys.* **208**:206-227 (2005).
 8. A. J. Christlieb, J. A. Rossmanith, and Q. Tang, *J. Comput Phys.* **268**:302-325 (2014).
-9. A. J. Christlieb et al., *SIAM J. Sci. Comput.* **40**(4):A2631-A2666 (2017).
-10. J. Huba, "Numerical Methods: Ideal and Hall MHD", *Proceedings of ISSS* **7**:26-31 (2005).
+9. J. Huba, "Numerical Methods: Ideal and Hall MHD", *Proceedings of ISSS* **7**:26-31 (2005).
+10. A. J. Christlieb et al., *SIAM J. Sci. Comput.* **40**(4):A2631-A2666 (2017).
+

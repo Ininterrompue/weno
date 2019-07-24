@@ -100,25 +100,6 @@ function diagonalize_jacobian!(flxrec)
     flxrec.L = inv(flxrec.R)
 end
 
-function diagonalize_jacobian!(flxrec, dim)
-    if dim == :X
-        eval, evecR = eigen(flxrec.Jx)
-        evecL = inv(evecR)
-        @. flxrec.evalx = eval |> real
-        @. flxrec.Rx = evecR |> real
-        # flxrec.evalx, flxrec.Rx = eigen(flxrec.Jx)
-        @. flxrec.Lx = flxrec.Lx |> real
-    elseif dim == :Y
-        eval, evecR = eigen(flxrec.Jy)
-        evecL = inv(evecR)
-        # @show evecR
-        @. flxrec.evaly = eval |> real
-        @. flxrec.Ry = evecR |> real
-        @. flxrec.Ly = flxrec.Ly |> real
-        # flxrec.evaly, flxrec.Ry = eigen(flxrec.Jy)
-    end
-end
-
 function update_switches!(w)
     w.θp = 1 / (1 + (w.α0p + w.α1p + w.α2p - 1)^2)
     w.θm = 1 / (1 + (w.α0m + w.α1m + w.α2m - 1)^2)
