@@ -13,6 +13,7 @@ Plots.pyplot()
 
 abstract type BoundaryCondition end
 struct DoubleMachReflection <: BoundaryCondition end
+struct RayleighTaylor       <: BoundaryCondition end
 struct RiemannNatural       <: BoundaryCondition end
 
 struct Variables{T}
@@ -64,9 +65,9 @@ struct SmoothnessFunctions{T}
 end
 
 
-function preallocate_statevectors(gridx)
+function preallocate_statevectors(gridx, gridy)
     for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E, :ρ2, :ρu2, :ρv2, :E2]
-        @eval $x = zeros($gridx.nx, $gridx.nx)
+        @eval $x = zeros($gridx.nx, $gridy.nx)
     end
     for x in [:ρ3, :ρu3, :ρv3, :E3]
         @eval $x = zeros(6)
@@ -77,14 +78,14 @@ function preallocate_statevectors(gridx)
     return StateVectors(Q, Q_proj, Q_local)
 end
 
-function preallocate_fluxes(gridx)
+function preallocate_fluxes(gridx, gridy)
     for x in [:fx1, :fx2, :fx3, :fx4, :fy1, :fy2, :fy3, :fy4,
               :gx1, :gx2, :gx3, :gx4, :gy1, :gy2, :gy3, :gy4]
-        @eval $x = zeros($gridx.nx, $gridx.nx)
+        @eval $x = zeros($gridx.nx, $gridy.nx)
     end
     for x in [:fx1_hat, :fx2_hat, :fx3_hat, :fx4_hat, :fy1_hat, :fy2_hat, :fy3_hat, :fy4_hat,
               :gx1_hat, :gx2_hat, :gx3_hat, :gx4_hat, :gy1_hat, :gy2_hat, :gy3_hat, :gy4_hat]
-        @eval $x = zeros($gridx.nx+1, $gridx.nx+1)
+        @eval $x = zeros($gridx.nx+1, $gridy.nx+1)
     end
     for x in [:f1_local, :f2_local, :f3_local, :f4_local]
         @eval $x = zeros(6)
@@ -101,9 +102,9 @@ function preallocate_fluxes(gridx)
     return Fluxes(Fx, Fy, Gx, Gy, Fx_hat, Fy_hat, Gx_hat, Gy_hat, F_local)
 end
 
-function preallocate_fluxreconstruction(gridx)
+function preallocate_fluxreconstruction(gridx, gridy)
     for x in [:ρ, :u, :v, :P, :ρu, :ρv, :E]
-        @eval $x = zeros($gridx.nx+1, $gridx.nx+1)
+        @eval $x = zeros($gridx.nx+1, $gridy.nx+1)
     end
     Q_avg = Variables(ρ, u, v, P, ρu, ρv, E)
     for x in [:evecLx, :evecLy, :evecRx, :evecRy]
@@ -112,9 +113,9 @@ function preallocate_fluxreconstruction(gridx)
     return FluxReconstruction(Q_avg, evecLx, evecLy, evecRx, evecRy)
 end
 
-function preallocate_smoothnessfunctions(gridx)
-    G₊ = zeros(gridx.nx, gridx.nx)
-    G₋ = zeros(gridx.nx, gridx.nx)
+function preallocate_smoothnessfunctions(gridx, gridy)
+    G₊ = zeros(gridx.nx, gridy.nx)
+    G₋ = zeros(gridx.nx, gridy.nx)
     return SmoothnessFunctions(G₊, G₋)
 end
 
@@ -165,13 +166,33 @@ end
 """
 Double Mach reflection problem
 (x, y) = [0, 3.25] × [0, 1], t_max = 0.2
+Initial conditions in the conserved variables.
 """
-function doublemach!(Q, gridx, gridy)
-    crx = gridx.cr_mesh; cry = gridy.cr_mesh
-
-    onesixth = argmin(@. abs(gridx - 1/6))
+function doublemach!(Q, gridx, gridy, γ)
+    for j in 1:gridy.nx, i in 1:gridx.nx
+        x = gridx.x[i]
+        y = gridy.x[j]
+        if y < sqrt(3) * (x - 1/6)
+            Q.ρ[i, j] = 1.4
+            Q.E[i, j] = 2.5
+        else
+            Q.ρ[i, j] = 8.0
+            Q.ρu[i, j] = 57.1597
+            Q.ρv[i, j] = -33.0012
+            Q.E[i, j] = 563.544
+        end
+    end
+    conserved_to_primitive!(Q, γ)
 end
 
+"""
+Rayleigh-Taylor instability bubble
+(x, y) = [0, 1/6] × [0, 1], t_max = 8.5
+Interface at y = 1/2 + 0.01*cos(6πx)
+"""
+function rayleightaylor!(Q, gridx, gridy)
+
+end
 
 function primitive_to_conserved!(Q, γ)
     @. Q.ρu = Q.ρ * Q.u
@@ -362,10 +383,10 @@ function project_to_realspace!(i, j, flux, flxrec, dim)
     end
     Ĝρ = Ĝ.ρ[i, j]; Ĝρu = Ĝ.ρu[i, j]; Ĝρv = Ĝ.ρv[i, j]; ĜE = Ĝ.E[i, j]
 
-    F̂.ρ[i, j]  = R[1, 1] * Ĝρ  + R[1, 2] * Ĝρu + R[1, 3] * Ĝρv + R[1, 4] * ĜE
-    F̂.ρu[i, j] = R[2, 1] * Ĝρ  + R[2, 2] * Ĝρu + R[2, 3] * Ĝρv + R[2, 4] * ĜE
-    F̂.ρv[i, j] = R[3, 1] * Ĝρ  + R[3, 2] * Ĝρu + R[3, 3] * Ĝρv + R[3, 4] * ĜE
-    F̂.E[i, j]  = R[4, 1] * Ĝρ  + R[4, 2] * Ĝρu + R[4, 3] * Ĝρv + R[4, 4] * ĜE
+    F̂.ρ[i, j]  = R[1, 1] * Ĝρ + R[1, 2] * Ĝρu + R[1, 3] * Ĝρv + R[1, 4] * ĜE
+    F̂.ρu[i, j] = R[2, 1] * Ĝρ + R[2, 2] * Ĝρu + R[2, 3] * Ĝρv + R[2, 4] * ĜE
+    F̂.ρv[i, j] = R[3, 1] * Ĝρ + R[3, 2] * Ĝρu + R[3, 3] * Ĝρv + R[3, 4] * ĜE
+    F̂.E[i, j]  = R[4, 1] * Ĝρ + R[4, 2] * Ĝρu + R[4, 3] * Ĝρv + R[4, 4] * ĜE
 end
 
 function update_numerical_fluxes!(i, j, F̂, q, f, wepar, ada)
@@ -391,7 +412,7 @@ end
 
 """
 Natural boundary conditions for the Riemann problems assigns the ghost points values
-that lie directly outside the boundaries.
+that lie directly outside the boundaries (zero gradient).
 """
 function boundary_conditions!(Q, gridx, gridy, bctype::RiemannNatural)
     for n in 1:3, i in gridx.cr_mesh
@@ -402,42 +423,82 @@ function boundary_conditions!(Q, gridx, gridy, bctype::RiemannNatural)
     end
     for i in gridy.cr_mesh, n in 1:3
         Q.ρ[n, i]  = Q.ρ[4, i];  Q.ρ[end-n+1, i]  = Q.ρ[end-3, i]
-        Q.ρu[n, i] = Q.ρu[4, i]; Q.ρu[end-n+1, i]  = Q.ρu[end-3, i]
-        Q.ρv[n, i] = Q.ρv[4, i]; Q.ρv[end-n+1, i]  = Q.ρv[end-3, i]
+        Q.ρu[n, i] = Q.ρu[4, i]; Q.ρu[end-n+1, i] = Q.ρu[end-3, i]
+        Q.ρv[n, i] = Q.ρv[4, i]; Q.ρv[end-n+1, i] = Q.ρv[end-3, i]
         Q.E[n, i]  = Q.E[4, i];  Q.E[end-n+1, i]  = Q.E[end-3, i]
     end
 end
 
+"""
+Reflecting boundary condition on the bottom at x = [1/6, 1], natural on the sides.
+On the top, the values are set to describe (preserve) the shock.
+"""
 function boundary_conditions!(Q, gridx, gridy, bctype::DoubleMachReflection)
+    onesixth = argmin(@. abs(gridx.x - 1/6))
+
+    # x = [0, 1/6], y = 0
+    for n in 1:3, i in 1:onesixth
+        Q.ρ[i, n]  = Q.ρ[i, 4]
+        Q.ρu[i, n] = Q.ρu[i, 4]
+        Q.ρv[i, n] = Q.ρv[i, 4]
+        Q.E[i, n]  = Q.E[i, 4]
+    end
+    # x = [1/6, 1], y = 0
+    for n in 1:3, i in onesixth+1:gridx.nx
+        Q.ρ[i, n]  = Q.ρ[i, 7-n]
+        Q.ρu[i, n] = -Q.ρu[i, 7-n]
+        Q.ρv[i, n] = -Q.ρv[i, 7-n]
+        Q.E[i, n]  = Q.E[i, 7-n]
+    end
+    for n in 1:3, i in gridx.cr_mesh
+        Q.ρ[i, end-n+1]  = Q.ρ[i, end-3]
+        Q.ρu[i, end-n+1] = Q.ρu[i, end-3]
+        Q.ρv[i, end-n+1] = Q.ρv[i, end-3]
+        Q.E[i, end-n+1]  = Q.E[i, end-3]
+    end
+    for i in gridy.cr_mesh, n in 1:3
+        Q.ρ[n, i]  = Q.ρ[4, i];  Q.ρ[end-n+1, i]  = Q.ρ[end-3, i]
+        Q.ρu[n, i] = Q.ρu[4, i]; Q.ρu[end-n+1, i] = Q.ρu[end-3, i]
+        Q.ρv[n, i] = Q.ρv[4, i]; Q.ρv[end-n+1, i] = Q.ρv[end-3, i]
+        Q.E[n, i]  = Q.E[4, i];  Q.E[end-n+1, i]  = Q.E[end-3, i]
+    end
+end
+
+function boundary_conditions!(Q, gridx, gridy, bctype::RayleighTaylor)
 
 end
 
 function plot_system(q, gridx, gridy, titlename, filename)
     crx = gridx.x[gridx.cr_mesh]; cry = gridy.x[gridy.cr_mesh]
     q_transposed = q[gridx.cr_mesh, gridy.cr_mesh] |> transpose
-    plt = Plots.contour(cry, crx, q_transposed, title=titlename, 
-                        fill=true, linecolor=:plasma, levels=30, aspect_ratio=1)
+    plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
+                        fill=true, linecolor=:plasma, levels=30, aspect_ratio=2.0)
     display(plt)
-    Plots.pdf(plt, filename)
+    # Plots.pdf(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.6, t_max=1.0)
-    gridx = Weno.grid(size=512, min=0.0, max=1.0)
-    gridy = Weno.grid(size=512, min=0.0, max=1.0)
+    gridx = Weno.grid(size=416, min=0.0, max=3.25)
+    gridy = Weno.grid(size=128, min=0.0, max=1.0)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters(gridx)
-    state = preallocate_statevectors(gridx)
-    flux = preallocate_fluxes(gridx)
-    flxrec = preallocate_fluxreconstruction(gridx)
-    smooth = preallocate_smoothnessfunctions(gridx)
+    state = preallocate_statevectors(gridx, gridy)
+    flux = preallocate_fluxes(gridx, gridy)
+    flxrec = preallocate_fluxreconstruction(gridx, gridy)
+    smooth = preallocate_smoothnessfunctions(gridx, gridy)
 
-    # doublemach!(state.Q, gridx, gridy)
+    doublemach!(state.Q, gridx, gridy, γ)
+    # rayleightaylor!(state.Q, gridx, gridy)
     # case6!(state.Q, gridx, gridy)
-    case12!(state.Q, gridx, gridy)
+    # case12!(state.Q, gridx, gridy)
     
     primitive_to_conserved!(state.Q, γ)
-    boundary_conditions!(state.Q, gridx, gridy, RiemannNatural())
+    boundary_conditions!(state.Q, gridx, gridy, DoubleMachReflection())
     t = 0.0; counter = 0; t0 = time()
+
+    # plot_system(state.Q.ρ, gridx, gridy, "Mass density", "case12_rho_512x512_ada")
+
+    # return
 
     q = state.Q_local; f = flux.F_local
     while t < t_max
@@ -509,13 +570,14 @@ function euler(; γ=7/5, cfl=0.6, t_max=1.0)
         end
 
         time_evolution!(flux.Fx_hat, flux.Fy_hat, state.Q, gridx, gridy, dt, rkpar)
-        boundary_conditions!(state.Q, gridx, gridy, RiemannNatural())
+        boundary_conditions!(state.Q, gridx, gridy, DoubleMachReflection())
         conserved_to_primitive!(state.Q, γ)
 
         counter += 1
         if counter % 50 == 0
             @printf("Iteration %d: t = %2.3f, dt = %2.3e, elapsed = %3.3f\n", 
                 counter, t, dt, time() - t0)
+            # plot_system(state.Q.ρ, gridx, gridy, "Mass density", "case12_rho_512x512_ada")
         end
     end
 
@@ -526,4 +588,4 @@ function euler(; γ=7/5, cfl=0.6, t_max=1.0)
 end
 
 # BenchmarkTools.@btime euler(t_max=0.01);
-@time euler(t_max=0.25)
+@time euler(t_max=0.2)
