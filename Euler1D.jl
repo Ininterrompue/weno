@@ -1,10 +1,4 @@
-# Solves the 1D Euler equations
-#   ∂Q/∂t + ∂F/∂x = 0
-# where Q = [ρ, ρu, E],
-#       F = [ρu, ρu² + P, u(E + P)]
-# and   E = P/(γ-1) + 1/2 * ρu².
-# For a gas with 5 dofs, γ = 7/5.
-
+include("./System.jl")
 include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
@@ -249,9 +243,9 @@ function plot_system(Q, gridx, filename)
 end
 
 function euler(; γ=7/5, cfl=0.3, t_max=1.0)
-    gridx = Weno.grid(size=256, min=-0.5, max=0.5)
+    gridx = grid(size=256, min=-0.5, max=0.5)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx)
-    wepar = Weno.preallocate_weno_parameters(gridx)
+    wepar = Weno.preallocate_weno_parameters()
     state = preallocate_statevectors(gridx)
     flux = preallocate_fluxes(gridx)
     flxrec = preallocate_fluxreconstruction(gridx)

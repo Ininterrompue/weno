@@ -1,22 +1,14 @@
 module Weno
 
-export grid, diagonalize_jacobian!, update_numerical_flux
+export diagonalize_jacobian!, update_numerical_flux
 export nonlinear_weights_plus!, nonlinear_weights_minus!, update_switches!
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 export weno_scheme!, runge_kutta!
 
 using LinearAlgebra
 
-struct GridParameters
-    nx::Int
-    dx::Float64
-    x::StepRangeLen{Float64, Float64, Float64}
-    cr_mesh::UnitRange{Int}
-    cr_cell::UnitRange{Int}
-    ghost::Int
-end
 
-struct RungeKuttaParameters{T}
+mutable struct RungeKuttaParameters{T}
     op::T   # du/dt = op(u, x) (nonlinear operator)
     u1::T   # 1st RK-3 iteration
     u2::T   # 2nd RK-3 iteration
@@ -59,15 +51,6 @@ mutable struct WenoParameters{T}
 end
 
 
-function grid(; size=32, min=-1.0, max=1.0, ghost=3)
-    nx = 2*ghost + size
-    dx = (max-min)/size
-    x  = min - (ghost - 1/2)*dx : dx : max + (ghost - 1/2)*dx
-    cr_mesh = ghost+1:nx-ghost
-    cr_cell = ghost:nx-ghost
-    return GridParameters(nx, dx, x, cr_mesh, cr_cell, ghost)
-end
-
 function preallocate_rungekutta_parameters(gridx)
     for x in [:op, :u1, :u2, :u3]
         @eval $x = zeros($gridx.nx)
@@ -82,7 +65,7 @@ function preallocate_rungekutta_parameters(gridx, gridy)
     return RungeKuttaParameters(op, u1, u2, u3)
 end
 
-function preallocate_weno_parameters(gridx)
+function preallocate_weno_parameters()
     fp = zeros(6)
     fm = zeros(6)
     return WenoParameters(fp, fm, 0.0,   # ev
@@ -116,6 +99,10 @@ function weno_scheme!(f_hat, gridx, rkpar)
     for i in gridx.cr_mesh
         rkpar.op[i] = -1/gridx.dx * (f_hat[i] - f_hat[i-1])
     end
+end
+
+function weno_scheme(f1, f0, gridx, rkpar)
+    return -1/gridx.dx * (f1 - f0)
 end
 
 function weno_scheme!(fx_hat, fy_hat, gridx, gridy, rkpar)

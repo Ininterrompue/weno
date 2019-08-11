@@ -1,9 +1,5 @@
-# Solves the inviscid 1D Burgers' equation 
-#   ∂u/∂t + ∂f/∂x = 0
-# with periodic boundary conditions.
-
+include("./System.jl")
 include("./Weno.jl")
-import .Weno
 using Printf
 import Plots, BenchmarkTools
 
@@ -42,13 +38,13 @@ function plot_system(u, gridx, filename)
     x = gridx.x; cr = gridx.cr_mesh
     plt = Plots.plot(x[cr], u[cr], title="Gaussian Wave", legend=false)
     display(plt)
-    Plots.pdf(plt, filename)
+    # Plots.pdf(plt, filename)
 end
 
 function burgers(; cfl=0.3, t_max=1.0)
-    gridx = Weno.grid(size=512, min=-5.0, max=5.0)
+    gridx = grid(size=512, min=-5.0, max=5.0)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx)
-    wepar = Weno.preallocate_weno_parameters(gridx)
+    wepar = Weno.preallocate_weno_parameters()
     u, f, f_hat = initialize_uf(gridx)
     u_local, f_local = initialize_local()
     dt = CFL_condition(gridx, cfl)
