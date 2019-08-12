@@ -105,6 +105,11 @@ function weno_scheme(f1, f0, gridx, rkpar)
     return -1/gridx.dx * (f1 - f0)
 end
 
+function weno_scheme(fx1, fx0, fy1, fy0, gridx, gridy, rkpar)
+    return -1/gridx.dx * (fx1 - fx0) +
+           -1/gridy.dx * (fy1 - fy0)
+end
+
 function weno_scheme!(fx_hat, fy_hat, gridx, gridy, rkpar)
     for j in gridy.cr_mesh, i in gridx.cr_mesh
         rkpar.op[i, j] = 
@@ -114,12 +119,18 @@ function weno_scheme!(fx_hat, fy_hat, gridx, gridy, rkpar)
 end
 
 # Lax-Friderichs flux splitting
-fplus(u, f, ev)  = 1/2 * (f + ev * u)
-fminus(u, f, ev) = 1/2 * (f - ev * u)
+fplus(u, f, α)  = 1/2 * (f + α*u)
+fminus(u, f, α) = 1/2 * (f - α*u)
 
 function update_numerical_flux(u, f, w, ada)
     @. w.fp = fplus(u, f, w.ev)
     @. w.fm = fminus(u, f, w.ev)
+    return fhatp(w, ada) + fhatm(w, ada)
+end
+
+function update_numerical_flux(u, f, w, v, ada)
+    @. w.fp = fplus(u, f, v)
+    @. w.fm = fminus(u, f, v)
     return fhatp(w, ada) + fhatm(w, ada)
 end
 

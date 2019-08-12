@@ -255,13 +255,16 @@ function update_xeigenvectors!(i, j, Q, flxrec, γ)
     R[1, 1] = 1
     R[1, 2] = 1
     R[1, 4] = 1
+
     R[2, 1] = u - c
     R[2, 2] = u
     R[2, 4] = u + c
+
     R[3, 1] = v
     R[3, 2] = v
     R[3, 3] = 1
     R[3, 4] = v
+
     R[4, 1] = (E + P) / ρ - c * u
     R[4, 2] = 1/2 * (u^2 + v^2)
     R[4, 3] = v
@@ -282,13 +285,16 @@ function update_yeigenvectors!(i, j, Q, flxrec, γ)
     R[1, 1] = 1
     R[1, 2] = 1
     R[1, 4] = 1
+
     R[2, 1] = u
     R[2, 2] = u
     R[2, 3] = 1
     R[2, 4] = u
+
     R[3, 1] = v - c
     R[3, 2] = v
     R[3, 4] = v + c
+
     R[4, 1] = (E + P) / ρ - c * v
     R[4, 2] = 1/2 * (u^2 + v^2)
     R[4, 3] = u
@@ -488,7 +494,6 @@ function boundary_conditions!(Q, sys, bctype::RayleighTaylor)
 end
 
 function plot_system(q, sys, titlename, filename)
-    half = sys.gridy.nx ÷ 2
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
