@@ -33,11 +33,11 @@ struct Fluxes{T}
 end
 
 mutable struct FluxReconstruction{T}
-    Q_avgprim::Matrix{T}   # averaged nonconserved quantities
-    Q_avgcons::Matrix{T}   # averaged conserved quantities
-    Lx::Matrix{T}          # left eigenvectors
+    Q_avgprim::Array{T, 3}   # averaged nonconserved quantities
+    Q_avgcons::Array{T, 3}   # averaged conserved quantities
+    Lx::Matrix{T}            # left eigenvectors
     Ly::Matrix{T}
-    Rx::Matrix{T}          # right eigenvectors
+    Rx::Matrix{T}            # right eigenvectors
     Ry::Matrix{T}
 end
 
@@ -98,8 +98,13 @@ function orszagtang!(state, sys)
     γ = sys.γ; Az = state.Az
     Q_prim = state.Q_prim; Q_cons = state.Q_cons
     nx = sys.gridx.nx; ny = sys.gridy.nx
+    @show collect(sys.gridx.x)
+    @show size(sys.gridx.x)
+    
+    error()
     for j in 1:ny, i in 1:nx
-        x = sys.gridx.x[i]; y = sys.gridy.x[i]
+        x = sys.gridx.x[i]
+        y = sys.gridy.x[j]
         Q_cons[i, j, 1] = γ^2       # ρ
         Q_prim[i, j, 4] = γ         # P
         Q_prim[i, j, 1] = -sin(y)   # u
@@ -503,8 +508,9 @@ end
 
 function boundary_conditions!(state, sys, bctype::Periodic)
     Q_prim = state.Q_prim; Q_cons = state.Q_cons
+    Az = state.Az
     nprim = sys.nprim; ncons = sys.ncons
-    nx = sys.gridx.nx; ny = sys.gridy.ny
+    nx = sys.gridx.nx; ny = sys.gridy.nx
 
     for n in 1:nprim, i in 1:nx
         Q_prim[i, end-0, n] = Q_prim[i, 6, n]
@@ -520,6 +526,14 @@ function boundary_conditions!(state, sys, bctype::Periodic)
         Q_cons[i, 3, n] = Q_cons[i, end-3, n]
         Q_cons[i, 2, n] = Q_cons[i, end-4, n]
         Q_cons[i, 1, n] = Q_cons[i, end-5, n]
+    end
+    for i in 1:nx
+        Az[i, end-0] = Az[i, 6]
+        Az[i, end-1] = Az[i, 5]
+        Az[i, end-2] = Az[i, 4]
+        Az[i, 3] = Az[i, end-3]
+        Az[i, 2] = Az[i, end-4]
+        Az[i, 1] = Az[i, end-5]
     end
 
     for n in 1:nprim, j in 1:ny
@@ -537,6 +551,14 @@ function boundary_conditions!(state, sys, bctype::Periodic)
         Q_cons[2, j, n] = Q_cons[end-4, j, n]
         Q_cons[1, j, n] = Q_cons[end-5, j, n]
     end
+    for j in 1:ny
+        Az[end-0, j] = Az[6, j]
+        Az[end-1, j] = Az[5, j]
+        Az[end-2, j] = Az[4, j]
+        Az[3, j] = Az[end-3, j]
+        Az[2, j] = Az[end-4, j]
+        Az[1, j] = Az[end-5, j]
+    end
 end
 
 function plot_system(q, sys, titlename, filename)
@@ -550,10 +572,10 @@ end
 
 
 function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
-    gridx = grid(size=256, min=0.0, max=2π)
-    gridy = grid(size=256, min=0.0, max=2π)
+    gridx = grid(size=128, min=0.0, max=2π)
+    gridy = grid(size=128, min=0.0, max=2π)
     sys = SystemParameters2D(gridx, gridy, 4, 8, γ)
-    rkpar = Weno.preallocate_rungekutta_parameters(gridx)
+    rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters()
     state = preallocate_statevectors(sys)
     flux = preallocate_fluxes(sys)
@@ -564,7 +586,8 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
     primitive_to_conserved!(state, sys)
     boundary_conditions!(state, sys, Periodic())
-
+    # plot_system(state.Q_cons[:, :, 6], sys, "Mass density", "orszagtang_512_ada")
+    # return
     t = 0.0; counter = 0; t0 = time()
     q = state.Q_local; f = flux.F_local
     while t < t_max
@@ -648,8 +671,9 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
     plot_system(state.Q_cons[:, :, 1], sys, "Mass density", "orszagtang_512_ada")
+    plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_512_ada")
 end
 
-@time idealmhd(t_max=0.5)
+@time idealmhd(t_max=0.1)
 
                     
