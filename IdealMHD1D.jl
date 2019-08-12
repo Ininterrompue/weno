@@ -392,7 +392,7 @@ end
 
 
 function idealmhd(; γ=2.0, cfl=0.2, t_max=0.0)
-    gridx = grid(size=256, min=-1.0, max=1.0)
+    gridx = grid(size=512, min=-1.0, max=1.0)
     sys = SystemParameters1D(gridx, 5, 7, γ)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx)
     wepar = Weno.preallocate_weno_parameters()

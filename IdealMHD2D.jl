@@ -98,10 +98,7 @@ function orszagtang!(state, sys)
     γ = sys.γ; Az = state.Az
     Q_prim = state.Q_prim; Q_cons = state.Q_cons
     nx = sys.gridx.nx; ny = sys.gridy.nx
-    @show collect(sys.gridx.x)
-    @show size(sys.gridx.x)
-    
-    error()
+
     for j in 1:ny, i in 1:nx
         x = sys.gridx.x[i]
         y = sys.gridy.x[j]
@@ -497,7 +494,7 @@ end
 function time_evolution!(state, flux, sys, dt, rkpar)
     for n in 1:sys.ncons
         for j in sys.gridy.cr_mesh, i in sys.gridx.cr_mesh
-            rkpar.op[i] = Weno.weno_scheme(
+            rkpar.op[i, j] = Weno.weno_scheme(
                 flux.Fx_hat[i, j, n], flux.Fx_hat[i-1, j, n],
                 flux.Fy_hat[i, j, n], flux.Fy_hat[i, j-1, n], 
                 sys.gridx, sys.gridy, rkpar)
@@ -586,8 +583,7 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
     primitive_to_conserved!(state, sys)
     boundary_conditions!(state, sys, Periodic())
-    # plot_system(state.Q_cons[:, :, 6], sys, "Mass density", "orszagtang_512_ada")
-    # return
+
     t = 0.0; counter = 0; t0 = time()
     q = state.Q_local; f = flux.F_local
     while t < t_max
@@ -674,6 +670,4 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
     plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_512_ada")
 end
 
-@time idealmhd(t_max=0.1)
-
-                    
+@time idealmhd(t_max=0.5)

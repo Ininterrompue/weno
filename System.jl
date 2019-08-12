@@ -26,7 +26,7 @@ end
 
 function grid(; size=32, min=-1.0, max=1.0, ghost=3)
     nx = 2*ghost + size
-    dx = (max-min)/size
+    dx = (max-min)/(size-1)
     x::StepRangeLen{Float64, Float64, Float64} = 
         min - ghost*dx : dx : max + ghost*dx
     cr_mesh = ghost+1:nx-ghost
