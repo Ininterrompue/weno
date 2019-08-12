@@ -2,6 +2,7 @@ include("./System.jl")
 include("./Weno.jl")
 using Printf, LinearAlgebra
 import Plots, BenchmarkTools
+import Base.sign
 Plots.pyplot()
 
 abstract type BoundaryCondition end
@@ -91,6 +92,11 @@ mag2(x, y) = x^2 + y^2
 mag2(x, y, z) = x^2 + y^2 + z^2
 
 """
+It is important that sign is defined so that sign(0) = 1 to avoid singular eigenvectors. 
+"""
+sign(x::Real) = x >= 0 ? oneunit(x) : x/abs(x)
+
+"""
 Orszag-Tang vortex
 (x, y) = [0, 2π] × [0, 2π], t_max = 2, 3, 4
 """
@@ -161,21 +167,22 @@ end
 function slow_magnetosonic(ρ, P, Bx, By, Bz, γ, dim)
     a2 = γ*P/ρ; b2 = (Bx^2 + By^2 + Bz^2)/ρ
     if dim == :X 
-        b2 = Bx^2/ρ
+        bn2 = Bx^2/ρ
     elseif dim == :Y 
-        b2 = By^2/ρ
+        bn2 = By^2/ρ
     end
-    return 1/sqrt(2) * sqrt(a2 + b2 - sqrt((a2 + b2)^2 - 4a2 * b2))
+
+    return 1/sqrt(2) * sqrt(a2 + b2 - sqrt((a2 + b2)^2 - 4a2 * bn2))
 end
 
 function fast_magnetosonic(ρ, P, Bx, By, Bz, γ, dim)
     a2 = γ*P/ρ; b2 = (Bx^2 + By^2 + Bz^2)/ρ
     if dim == :X 
-        b2 = Bx^2/ρ
+        bn2 = Bx^2/ρ
     elseif dim == :Y 
-        b2 = By^2/ρ
+        bn2 = By^2/ρ
     end
-    return 1/sqrt(2) * sqrt(a2 + b2 + sqrt((a2 + b2)^2 - 4a2 * b2))
+    return 1/sqrt(2) * sqrt(a2 + b2 + sqrt((a2 + b2)^2 - 4a2 * bn2))
 end
 
 function max_eigval(state, sys, dim)
@@ -593,30 +600,30 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
         t += dt 
         
         # Component-wise reconstruction
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-            update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, false)
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-            update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, false)
-        end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+        #     update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, false)
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+        #     update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, false)
+        # end
 
         # Characteristic-wise reconstruction
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_xeigenvectors!(i, j, state, flxrec, sys)
-        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-        #     update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-        #     project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_yeigenvectors!(i, j, state, flxrec, sys)
-        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-        #     update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-        #     project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        # end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_xeigenvectors!(i, j, state, flxrec, sys)
+            project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+            update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+            update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+            project_to_realspace!(i, j, flux, flxrec, sys, :X)
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_yeigenvectors!(i, j, state, flxrec, sys)
+            project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+            update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+            update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+            project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        end
 
         # AdaWENO scheme
         # update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
