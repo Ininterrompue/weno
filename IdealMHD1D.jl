@@ -2,6 +2,7 @@ include("./System.jl")
 include("./Weno.jl")
 using Printf, LinearAlgebra
 import Plots, BenchmarkTools
+import Base.sign
 Plots.pyplot()
 
 """
@@ -70,6 +71,11 @@ end
 
 mag2(x, y) = x^2 + y^2
 mag2(x, y, z) = x^2 + y^2 + z^2
+
+"""
+It is important that sign is defined so that sign(0) = 1 to avoid singular eigenvectors. 
+"""
+sign(x::Real) = x >= 0 ? oneunit(x) : x/abs(x)
 
 """
 Brio and Wu Riemann problem 1 (Sod problem with B-field)
@@ -381,7 +387,7 @@ function plot_system(state, sys, filename)
     ρ = state.Q_cons[cr, 1]
     By = state.Q_cons[cr, 5]
 
-    plt = Plots.plot(x, ρ, title="1D ideal MHD equations", label="rho")
+    plt = Plots.plot(x, ρ, title="Brio-Wu Problem", label="rho")
     Plots.plot!(x, u, label="u")
     Plots.plot!(x, v, label="v")
     Plots.plot!(x, P, label="P")

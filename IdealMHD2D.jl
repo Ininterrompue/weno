@@ -13,12 +13,12 @@ Primitive: (u, v, w, P)
 Conserved: (ρ, ρu, ρv, ρw, Bx, By, Bz, E)
 """
 struct StateVectors{T}
-    Q_prim::Array{T, 3}    # real space primitive variables
-    Q_cons::Array{T, 3}    # real space conserved, dynamic variables
-    Az::Matrix{T}           # vector potential
-    Q_proj::Array{T, 3}    # characteristic space
-    Q_local::Matrix{T}     # local real space
-    Az_local::Vector{T}     # local vector potential
+    Q_prim::Array{T, 3}   # real space primitive variables
+    Q_cons::Array{T, 3}   # real space conserved, dynamic variables
+    Az::Matrix{T}         # vector potential
+    Q_proj::Array{T, 3}   # characteristic space
+    Q_local::Matrix{T}    # local real space
+    Az_local::Vector{T}   # local derivative of vector potential
 end
 
 struct Fluxes{T}
@@ -30,6 +30,8 @@ struct Fluxes{T}
     Fy_hat::Array{T, 3}
     Gx_hat::Array{T, 3}   # numerical flux, characteristic space
     Gy_hat::Array{T, 3}
+    Az_x::Array{T, 3}     # x-derivative of Az, 1 → +, 2 → -
+    Az_y::Array{T, 3}     # x-derivative of Az, 1 → +, 2 → -
     F_local::Matrix{T}    # local physical flux, real space
 end
 
@@ -67,8 +69,9 @@ function preallocate_fluxes(sys)
     Gx = zeros(nx, ny, ncons); Gy = zeros(nx, ny, ncons);
     Fx_hat = zeros(nx+1, ny+1, ncons); Fy_hat = zeros(nx+1, ny+1, ncons)
     Gx_hat = zeros(nx+1, ny+1, ncons); Gy_hat = zeros(nx+1, ny+1, ncons)
+    Az_x = zeros(nx, ny, 2); Az_y = zeros(nx, ny, 2)
     F_local = zeros(6, ncons)
-    return Fluxes(Fx, Fy, Gx, Gy, Fx_hat, Fy_hat, Gx_hat, Gy_hat, F_local)
+    return Fluxes(Fx, Fy, Gx, Gy, Fx_hat, Fy_hat, Gx_hat, Gy_hat, Az_x, Az_y, F_local)
 end
 
 function preallocate_fluxreconstruction(sys)
@@ -171,7 +174,6 @@ function slow_magnetosonic(ρ, P, Bx, By, Bz, γ, dim)
     elseif dim == :Y 
         bn2 = By^2/ρ
     end
-
     return 1/sqrt(2) * sqrt(a2 + b2 - sqrt((a2 + b2)^2 - 4a2 * bn2))
 end
 
@@ -240,12 +242,12 @@ function update_smoothnessfunctions!(smooth, state, sys, α)
     for j in 1:ny, i in 1:nx
         ρ  = Q_cons[i, j, 1]; ρu = Q_cons[i, j, 2]
         ρv = Q_cons[i, j, 3]; ρw = Q_cons[i, j, 4]
-        P  = Q_prim[i, j, 4]; Bx = Q_cons[i, j, 5]
-        By = Q_cons[i, j, 6]; Bz = Q_cons[i, j, 7]
-        P_tot = P + 1/2 * mag2(Bx, By, Bz)
+        Bx = Q_cons[i, j, 5]; By = Q_cons[i, j, 6]; 
+        Bz = Q_cons[i, j, 7]; E  = Q_cons[i, j, 8]
+        # P_tot = P + 1/2 * mag2(Bx, By, Bz)
 
-        smooth.G₊[i] = ρ + mag2(ρu, ρv, ρw) + P_tot + α * (ρu + ρv + ρw)
-        smooth.G₋[i] = ρ + mag2(ρu, ρv, ρw) + P_tot - α * (ρu + ρv + ρw)
+        smooth.G₊[i] = ρ + mag2(ρu, ρv, ρw) + E + α * (ρu + ρv + ρw)
+        smooth.G₋[i] = ρ + mag2(ρu, ρv, ρw) + E - α * (ρu + ρv + ρw)
     end
 end
 
@@ -510,20 +512,68 @@ function time_evolution!(state, flux, sys, dt, rkpar)
     end
 end
 
-function boundary_conditions!(state, sys, bctype::Periodic)
-    Q_prim = state.Q_prim; Q_cons = state.Q_cons
-    Az = state.Az
-    nprim = sys.nprim; ncons = sys.ncons
+"""
+Updates the local derivative of the vector potential to control oscillations, 
+as the derivative of Az produces a physical quantity.
+"""
+function update_local_Az_derivatives!(i, j, state, sys, wepar, dim)
+    Az_local = state.Az_local; Az = state.Az
+    dx = sys.gridx.dx; dy = sys.gridy.dx
+    if dim == :X
+        for k in 1:6
+            Az_local[k] = 1/dx * (Az[i+k-3, j] - Az[i+k-4, j])
+        end
+    elseif dim == :Y
+        for k in 1:6
+            Az_local[k] = 1/dy * (Az[i, j+k-3] - Az[i, j+k-4])
+        end
+    end
+    @. wepar.fp = state.Az_local
+    @. wepar.fm = state.Az_local
+end
+
+function update_numerical_Az_derivatives!(i, j, state, flux, wepar, dim)
+    if dim == :X
+        flux.Az_x[i, j, 1] = Weno.fhatm(wepar, false)
+        flux.Az_x[i, j, 2] = Weno.fhatp(wepar, false)
+    elseif dim == :Y
+        flux.Az_y[i, j, 1] = Weno.fhatm(wepar, false)
+        flux.Az_y[i, j, 2] = Weno.fhatp(wepar, false)
+    end
+end
+
+function time_evolution_Az!(state, flux, sys, dt, rkpar)
+    crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
+    Q_prim = state.Q_prim
+    Az_x = flux.Az_x; Az_y = flux.Az_y
+    αx = maximum(@view(Q_prim[:, :, 1]))
+    αy = maximum(@view(Q_prim[:, :, 2]))
+    for j in cry, i in crx
+        rkpar.op[i, j] = -Q_prim[i, j, 1]/2 * (Az_x[i, j, 1] + Az_x[i, j, 2]) + 
+                         -Q_prim[i, j, 2]/2 * (Az_y[i, j, 1] + Az_y[i, j, 2]) +
+                         αx/2 * (Az_x[i, j, 1] - Az_x[i, j, 2]) + 
+                         αy/2 * (Az_y[i, j, 1] - Az_y[i, j, 2])
+    end
+    Weno.runge_kutta!(state.Az, dt, rkpar)
+end
+
+function correct_magneticfield!(state, sys)
+    Q_cons = state.Q_cons; Az = state.Az
+    crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
+    dx = sys.gridx.dx; dy = sys.gridy.dx
+
+    for j in cry, i in crx
+        Q_cons[i, j, 5] = 1/dy * (+1/60 * Az[i, j+3] - 3/20 * Az[i, j+2] + 3/4  * Az[i, j+1] - 
+                                  +3/4  * Az[i, j-1] + 3/20 * Az[i, j-2] - 1/60 * Az[i, j-3])
+        Q_cons[i, j, 6] = 1/dx * (-1/60 * Az[i+3, j] + 3/20 * Az[i+2, j] - 3/4  * Az[i+1, j] +
+                                  +3/4  * Az[i-1, j] - 3/20 * Az[i-2, j] + 1/60 * Az[i-3, j])
+    end
+end
+
+function boundary_conditions_conserved!(state, sys, bctype::Periodic)
+    Q_cons = state.Q_cons; ncons = sys.ncons
     nx = sys.gridx.nx; ny = sys.gridy.nx
-
-    for n in 1:nprim, i in 1:nx
-        Q_prim[i, end-0, n] = Q_prim[i, 6, n]
-        Q_prim[i, end-1, n] = Q_prim[i, 5, n]
-        Q_prim[i, end-2, n] = Q_prim[i, 4, n]
-        Q_prim[i, 3, n] = Q_prim[i, end-3, n]
-        Q_prim[i, 2, n] = Q_prim[i, end-4, n]
-        Q_prim[i, 1, n] = Q_prim[i, end-5, n]
-
+    for n in 1:ncons, i in 1:nx
         Q_cons[i, end-0, n] = Q_cons[i, 6, n]
         Q_cons[i, end-1, n] = Q_cons[i, 5, n]
         Q_cons[i, end-2, n] = Q_cons[i, 4, n]
@@ -531,15 +581,27 @@ function boundary_conditions!(state, sys, bctype::Periodic)
         Q_cons[i, 2, n] = Q_cons[i, end-4, n]
         Q_cons[i, 1, n] = Q_cons[i, end-5, n]
     end
-    for i in 1:nx
-        Az[i, end-0] = Az[i, 6]
-        Az[i, end-1] = Az[i, 5]
-        Az[i, end-2] = Az[i, 4]
-        Az[i, 3] = Az[i, end-3]
-        Az[i, 2] = Az[i, end-4]
-        Az[i, 1] = Az[i, end-5]
+    for n in 1:ncons, j in 1:ny
+        Q_cons[end-0, j, n] = Q_cons[6, j, n]
+        Q_cons[end-1, j, n] = Q_cons[5, j, n]
+        Q_cons[end-2, j, n] = Q_cons[4, j, n]
+        Q_cons[3, j, n] = Q_cons[end-3, j, n]
+        Q_cons[2, j, n] = Q_cons[end-4, j, n]
+        Q_cons[1, j, n] = Q_cons[end-5, j, n]
     end
+end
 
+function boundary_conditions_primitive!(state, sys, bctype::Periodic)
+    Q_prim = state.Q_prim; nprim = sys.nprim
+    nx = sys.gridx.nx; ny = sys.gridy.nx
+    for n in 1:nprim, i in 1:nx
+        Q_prim[i, end-0, n] = Q_prim[i, 6, n]
+        Q_prim[i, end-1, n] = Q_prim[i, 5, n]
+        Q_prim[i, end-2, n] = Q_prim[i, 4, n]
+        Q_prim[i, 3, n] = Q_prim[i, end-3, n]
+        Q_prim[i, 2, n] = Q_prim[i, end-4, n]
+        Q_prim[i, 1, n] = Q_prim[i, end-5, n]
+    end
     for n in 1:nprim, j in 1:ny
         Q_prim[end-0, j, n] = Q_prim[6, j, n]
         Q_prim[end-1, j, n] = Q_prim[5, j, n]
@@ -547,13 +609,19 @@ function boundary_conditions!(state, sys, bctype::Periodic)
         Q_prim[3, j, n] = Q_prim[end-3, j, n]
         Q_prim[2, j, n] = Q_prim[end-4, j, n]
         Q_prim[1, j, n] = Q_prim[end-5, j, n]
+    end
+end
 
-        Q_cons[end-0, j, n] = Q_cons[6, j, n]
-        Q_cons[end-1, j, n] = Q_cons[5, j, n]
-        Q_cons[end-2, j, n] = Q_cons[4, j, n]
-        Q_cons[3, j, n] = Q_cons[end-3, j, n]
-        Q_cons[2, j, n] = Q_cons[end-4, j, n]
-        Q_cons[1, j, n] = Q_cons[end-5, j, n]
+function boundary_conditions_Az!(state, sys, bctype::Periodic)
+    Az = state.Az
+    nx = sys.gridx.nx; ny = sys.gridy.nx
+    for i in 1:nx
+        Az[i, end-0] = Az[i, 6]
+        Az[i, end-1] = Az[i, 5]
+        Az[i, end-2] = Az[i, 4]
+        Az[i, 3] = Az[i, end-3]
+        Az[i, 2] = Az[i, end-4]
+        Az[i, 1] = Az[i, end-5]
     end
     for j in 1:ny
         Az[end-0, j] = Az[6, j]
@@ -569,15 +637,15 @@ function plot_system(q, sys, titlename, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
-                        fill=true, linecolor=:plasma, levels=30, aspect_ratio=1.0)
+                        fill=false, linecolor=:plasma, levels=30, aspect_ratio=1.0)
     display(plt)
-    # Plots.pdf(plt, filename)
+    Plots.pdf(plt, filename)
 end
 
 
 function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
-    gridx = grid(size=128, min=0.0, max=2π)
-    gridy = grid(size=128, min=0.0, max=2π)
+    gridx = grid(size=256, min=0.0, max=2π)
+    gridy = grid(size=256, min=0.0, max=2π)
     sys = SystemParameters2D(gridx, gridy, 4, 8, γ)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters()
@@ -587,15 +655,17 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
     smooth = preallocate_smoothnessfunctions(sys)
 
     orszagtang!(state, sys)
+    bctype = Periodic()
 
     primitive_to_conserved!(state, sys)
-    boundary_conditions!(state, sys, Periodic())
+    boundary_conditions_primitive!(state, sys, bctype)
+    boundary_conditions_conserved!(state, sys, bctype)
+    boundary_conditions_Az!(state, sys, bctype)
 
     t = 0.0; counter = 0; t0 = time()
     q = state.Q_local; f = flux.F_local
     while t < t_max
         update_physical_fluxes!(flux, state, sys)
-        # wepar.ev = max_eigval(state, sys)
         dt = CFL_condition(cfl, state, sys, wepar)
         t += dt 
         
@@ -610,59 +680,74 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
         # end
 
         # Characteristic-wise reconstruction
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_xeigenvectors!(i, j, state, flxrec, sys)
-            project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-            update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-            update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-            project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_yeigenvectors!(i, j, state, flxrec, sys)
-            project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-            update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-            update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-            project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_xeigenvectors!(i, j, state, flxrec, sys)
+        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+        #     update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+        #     project_to_realspace!(i, j, flux, flxrec, sys, :X)
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_yeigenvectors!(i, j, state, flxrec, sys)
+        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+        #     update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+        #     project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        # end
 
         # AdaWENO scheme
-        # update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
-        #     Weno.nonlinear_weights_plus!(wepar)
-        #     Weno.nonlinear_weights_minus!(wepar)
-        #     Weno.update_switches!(wepar)
-        #     if wepar.θp > 0.5 && wepar.θm > 0.5
-        #         update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-        #         update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
-        #     else
-        #         update_xeigenvectors!(i, j, state, flxrec, sys)
-        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-        #         update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-        #         update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-        #         project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        #     end
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
-        #     Weno.nonlinear_weights_plus!(wepar)
-        #     Weno.nonlinear_weights_minus!(wepar)
-        #     Weno.update_switches!(wepar)
-        #     if wepar.θp > 0.5 && wepar.θm > 0.5
-        #         update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-        #         update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
-        #     else
-        #         update_yeigenvectors!(i, j, state, flxrec, sys)
-        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-        #         update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-        #         update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-        #         project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        #     end
-        # end
+        update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
+            Weno.nonlinear_weights_plus!(wepar)
+            Weno.nonlinear_weights_minus!(wepar)
+            Weno.update_switches!(wepar)
+            if wepar.θp > 0.5 && wepar.θm > 0.5
+                update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+                update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
+            else
+                update_xeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+                update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+                update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :X)
+            end
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
+            Weno.nonlinear_weights_plus!(wepar)
+            Weno.nonlinear_weights_minus!(wepar)
+            Weno.update_switches!(wepar)
+            if wepar.θp > 0.5 && wepar.θm > 0.5
+                update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+                update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
+            else
+                update_yeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+                update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+                update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+            end
+        end
+
+        for j in gridy.cr_mesh, i in gridx.cr_mesh
+            update_local_Az_derivatives!(i, j, state, sys, wepar, :X)
+            update_numerical_Az_derivatives!(i, j, state, flux, wepar, :X)
+        end
+        for j in gridy.cr_mesh, i in gridx.cr_mesh
+            update_local_Az_derivatives!(i, j, state, sys, wepar, :Y)
+            update_numerical_Az_derivatives!(i, j, state, flux, wepar, :Y)
+        end
+
+        time_evolution_Az!(state, flux, sys, dt, rkpar)
+        boundary_conditions_Az!(state, sys, bctype)
 
         time_evolution!(state, flux, sys, dt, rkpar)
-        boundary_conditions!(state, sys, Periodic())
+        correct_magneticfield!(state, sys)
+        boundary_conditions_conserved!(state, sys, bctype)
+
         conserved_to_primitive!(state, sys)
+        boundary_conditions_primitive!(state, sys, bctype)
 
         counter += 1
         if counter % 100 == 0
@@ -673,8 +758,11 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
-    plot_system(state.Q_cons[:, :, 1], sys, "Mass density", "orszagtang_512_ada")
-    plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_512_ada")
+    plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256_t4_ada")
+    plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t4_ada")
+    plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t4_ada")
+    plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t4_ada")
+    plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t4_ada")
 end
 
-@time idealmhd(t_max=0.5)
+@time idealmhd(t_max=4.0)

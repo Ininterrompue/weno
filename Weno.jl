@@ -1,6 +1,6 @@
 module Weno
 
-export diagonalize_jacobian!, update_numerical_flux
+export diagonalize_jacobian!, update_numerical_flux, fhatp, fhatm
 export nonlinear_weights_plus!, nonlinear_weights_minus!, update_switches!
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 export weno_scheme!, runge_kutta!
