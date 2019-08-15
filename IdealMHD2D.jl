@@ -200,7 +200,7 @@ function CFL_condition(cfl, state, sys, wepar)
     vx = max_eigval(state, sys, :X)
     vy = max_eigval(state, sys, :Y)
     wepar.ev = max(vx, vy)
-    return 0.02 * cfl * dx*dy / (vx*dy + vy*dx)
+    return 0.05 * cfl * dx*dy / (vx*dy + vy*dx)
 end
 
 function update_physical_fluxes!(flux, state, sys)
@@ -233,21 +233,6 @@ function update_physical_fluxes!(flux, state, sys)
       # Fy[i, j, 6] = 0
         Fy[i, j, 7] = v * Bz - w * By
         Fy[i, j, 8] = v * (E + P_tot) - By * (u*Bx + v*By + w*Bz)
-    end
-end
-
-function update_smoothnessfunctions!(smooth, state, sys, α)
-    nx = sys.gridx.nx; ny = sys.gridy.nx
-    Q_prim = state.Q_prim; Q_cons = state.Q_cons
-    for j in 1:ny, i in 1:nx
-        ρ  = Q_cons[i, j, 1]; ρu = Q_cons[i, j, 2]
-        ρv = Q_cons[i, j, 3]; ρw = Q_cons[i, j, 4]
-        Bx = Q_cons[i, j, 5]; By = Q_cons[i, j, 6]; 
-        Bz = Q_cons[i, j, 7]; E  = Q_cons[i, j, 8]
-        # P_tot = P + 1/2 * mag2(Bx, By, Bz)
-
-        smooth.G₊[i] = ρ + mag2(ρu, ρv, ρw) + E + α * (ρu + ρv + ρw)
-        smooth.G₋[i] = ρ + mag2(ρu, ρv, ρw) + E - α * (ρu + ρv + ρw)
     end
 end
 
@@ -447,6 +432,25 @@ function update_local!(i, j, Q, F, Q_local, F_local, sys, dim)
     end
 end
 
+function update_smoothnessfunctions!(smooth, state, sys, α)
+    nx = sys.gridx.nx; ny = sys.gridy.nx
+    Q_prim = state.Q_prim; Q_cons = state.Q_cons
+    for j in 1:ny, i in 1:nx
+        ρ  = Q_cons[i, j, 1]
+        ρu = Q_cons[i, j, 2]
+        ρv = Q_cons[i, j, 3]
+        ρw = Q_cons[i, j, 4]
+        # Bx = Q_cons[i, j, 5]
+        # By = Q_cons[i, j, 6] 
+        # Bz = Q_cons[i, j, 7]
+        E  = Q_cons[i, j, 8]
+        # P_tot = P + 1/2 * mag2(Bx, By, Bz)
+
+        smooth.G₊[i] = ρ + E + α * (ρu + ρv + ρw)
+        smooth.G₋[i] = ρ + E - α * (ρu + ρv + ρw)
+    end
+end
+
 function update_local_smoothnessfunctions!(i, j, smooth, w, dim)
     if dim == :X
         for k in 1:6
@@ -468,13 +472,25 @@ function project_to_localspace!(i, j, state, flux, flxrec, sys, dim)
 
     if dim == :X
         for n in 1:sys.ncons, k in i-2:i+3
-            Q_proj[k, j, n] = @views Lx[n, :] ⋅ Q_cons[k, j, :]
-            Gx[k, j, n] = @views Lx[n, :] ⋅ Fx[k, j, :]
+            # Q_proj[k, j, n] = @views Lx[n, :] ⋅ Q_cons[k, j, :]
+            # Gx[k, j, n] = @views Lx[n, :] ⋅ Fx[k, j, :]
+            Q_proj[k, j, n] = 0.0
+            Gx[k, j, n] = 0.0
+            for m in 1:sys.ncons
+                Q_proj[k, j, n] += Lx[n, m] * Q_cons[k, j, m]
+                Gx[k, j, n] += Lx[n, m] * Fx[k, j, m]
+            end
         end
     elseif dim == :Y
         for n in 1:sys.ncons, k in j-2:j+3
-            Q_proj[i, k, n] = @views Ly[n, :] ⋅ Q_cons[i, k, :]
-            Gy[i, k, n] = @views Ly[n, :] ⋅ Fy[i, k, :]
+            # Q_proj[i, k, n] = @views Ly[n, :] ⋅ Q_cons[i, k, :]
+            # Gy[i, k, n] = @views Ly[n, :] ⋅ Fy[i, k, :]
+            Q_proj[i, k, n] = 0.0
+            Gy[i, k, n] = 0.0
+            for m in 1:sys.ncons
+                Q_proj[i, k, n] += Ly[n, m] * Q_cons[i, k, m]
+                Gy[i, k, n] += Ly[n, m] * Fy[i, k, m]
+            end
         end
     end
 end
@@ -485,11 +501,19 @@ function project_to_realspace!(i, j, flux, flxrec, sys, dim)
 
     if dim == :X
         for n in 1:sys.ncons
-            Fx_hat[i, j, n] = @views Rx[n, :] ⋅ Gx_hat[i, j, :]
+            # Fx_hat[i, j, n] = @views Rx[n, :] ⋅ Gx_hat[i, j, :]
+            Fx_hat[i, j, n] = 0.0
+            for m in 1:sys.ncons
+                Fx_hat[i, j, n] += Rx[n, m] * Gx_hat[i, j, m]
+            end
         end
     elseif dim == :Y
         for n in 1:sys.ncons
-            Fy_hat[i, j, n] = @views Ry[n, :] ⋅ Gy_hat[i, j, :]
+            # Fy_hat[i, j, n] = @views Ry[n, :] ⋅ Gy_hat[i, j, :]
+            Fy_hat[i, j, n] = 0.0
+            for m in 1:sys.ncons
+                Fy_hat[i, j, n] += Ry[n, m] * Gy_hat[i, j, m]
+            end
         end
     end
 end
@@ -633,17 +657,24 @@ function boundary_conditions_Az!(state, sys, bctype::Periodic)
     end
 end
 
+function calculate_temperature(state, sys)
+    nx = sys.gridx.nx; ny = sys.gridy.nx
+    T = zeros(nx, ny)
+    @. T = state.Q_prim[:, :, 4] / 2state.Q_cons[:, :, 1]
+    return T
+end
+
 function plot_system(q, sys, titlename, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
-                        fill=false, linecolor=:plasma, levels=30, aspect_ratio=1.0)
+                        fill=true, linecolor=:plasma, levels=100, aspect_ratio=1.0)
     display(plt)
     Plots.pdf(plt, filename)
 end
 
 
-function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
+function idealmhd(; γ=5/3, cfl=0.6, t_max=0.0)
     gridx = grid(size=256, min=0.0, max=2π)
     gridy = grid(size=256, min=0.0, max=2π)
     sys = SystemParameters2D(gridx, gridy, 4, 8, γ)
@@ -664,10 +695,11 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
     t = 0.0; counter = 0; t0 = time()
     q = state.Q_local; f = flux.F_local
+    t_array = [1.0, 2.0, 3.0, 4.0]; t_counter = 1
     while t < t_max
         update_physical_fluxes!(flux, state, sys)
         dt = CFL_condition(cfl, state, sys, wepar)
-        t += dt 
+        t += dt
         
         # Component-wise reconstruction
         # for j in gridy.cr_cell, i in gridx.cr_cell
@@ -753,16 +785,31 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
         if counter % 100 == 0
             @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
                 counter, t, dt, wepar.ev, time() - t0)
+            # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t3_ada")
+        end
+        if t > t_array[t_counter]
+            plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t$(t_counter)_ada")
+            plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t$(t_counter)_ada")
+            plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t$(t_counter)_ada")
+            plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t$(t_counter)_ada")
+            plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t$(t_counter)_ada")
+        
+            T = calculate_temperature(state, sys)
+            plot_system(T, sys, "T", "orszagtang_T_256x256_t$(t_counter)_ada")
+            t_counter += 1
         end
     end
 
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
-    plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256_t4_ada")
-    plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t4_ada")
-    plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t4_ada")
-    plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t4_ada")
-    plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t4_ada")
+    # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t3_ada")
+    # plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t3_ada")
+    # plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t3_ada")
+    # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t3_ada")
+    # plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t3_ada")
+
+    # T = calculate_temperature(state, sys)
+    # plot_system(T, sys, "T", "orszagtang_T_256x256_t3_ada")
 end
 
 @time idealmhd(t_max=4.0)

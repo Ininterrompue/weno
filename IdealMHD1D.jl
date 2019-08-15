@@ -183,12 +183,11 @@ function update_smoothnessfunctions!(smooth, state, sys, α)
     nx = sys.gridx.nx
     Q_prim = state.Q_prim; Q_cons = state.Q_cons
     for i in 1:nx
-        ρ = Q_cons[i, 1]; ρu = Q_cons[i, 2]; ρv = Q_cons[i, 3]; ρw = Q_cons[i, 4]
-        P = Q_prim[i, 4]; Bx = Q_prim[i, 5]; By = Q_cons[i, 5]; Bz = Q_cons[i, 6]
-        P_B = 1/2 * mag2(Bx, By, Bz)
+        ρu = Q_cons[i, 2]; ρv = Q_cons[i, 3]; ρw = Q_cons[i, 4]
+        ρ = Q_cons[i, 1]; E = Q_cons[i, 7]
 
-        smooth.G₊[i] = ρ + mag2(ρu, ρv, ρw) + P + P_B + α * (ρu + ρv + ρw)
-        smooth.G₋[i] = ρ + mag2(ρu, ρv, ρw) + P + P_B - α * (ρu + ρv + ρw)
+        smooth.G₊[i] = ρ + E + α * (ρu + ρv + ρw)
+        smooth.G₋[i] = ρ + E - α * (ρu + ρv + ρw)
     end
 end
 
@@ -352,15 +351,25 @@ function project_to_localspace!(i, state, flux, flxrec, sys)
     Q_cons = state.Q_cons; Q_proj = state.Q_proj
     Fx = flux.Fx; Gx = flux.Gx; Lx = flxrec.Lx
     for n in 1:sys.ncons, j in i-2:i+3
-        Q_proj[j, n] = @views Lx[n, :] ⋅ Q_cons[j, :]
-        Gx[j, n] = @views Lx[n, :] ⋅ Fx[j, :]
+        # Q_proj[j, n] = @views Lx[n, :] ⋅ Q_cons[j, :]
+        # Gx[j, n] = @views Lx[n, :] ⋅ Fx[j, :]
+        Q_proj[j, n] = 0.0
+        Gx[j, n] = 0.0
+        for m in 1:sys.ncons
+            Q_proj[j, n] += Lx[n, m] * Q_cons[j, m]
+            Gx[j, n] += Lx[n, m] * Fx[j, m]
+        end
     end
 end
 
 function project_to_realspace!(i, flux, flxrec, sys)
     F_hat = flux.Fx_hat; G_hat = flux.Gx_hat; Rx = flxrec.Rx
     for n in 1:sys.ncons
-        F_hat[i, n] = @views Rx[n, :] ⋅ G_hat[i, :]
+        # F_hat[i, n] = @views Rx[n, :] ⋅ G_hat[i, :]
+        F_hat[i, n] = 0.0
+        for m in 1:sys.ncons
+            F_hat[i, n] += Rx[n, m] * G_hat[i, m]
+        end
     end
 end
 
@@ -397,7 +406,7 @@ function plot_system(state, sys, filename)
 end
 
 
-function idealmhd(; γ=2.0, cfl=0.2, t_max=0.0)
+function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
     gridx = grid(size=512, min=-1.0, max=1.0)
     sys = SystemParameters1D(gridx, 5, 7, γ)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx)

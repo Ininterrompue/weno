@@ -157,8 +157,8 @@ function update_physical_fluxes!(flux, Q)
 end
 
 function update_smoothnessfunctions!(smooth, Q, α)
-    @. smooth.G₊ = Q.ρ + Q.ρ * Q.u^2 + Q.P + α * Q.ρ * Q.u
-    @. smooth.G₋ = Q.ρ + Q.ρ * Q.u^2 + Q.P - α * Q.ρ * Q.u
+    @. smooth.G₊ = Q.ρ + Q.E + α * Q.ρu
+    @. smooth.G₋ = Q.ρ + Q.E - α * Q.ρu
 end
 
 # J is defined starting from the leftmost j-1/2.

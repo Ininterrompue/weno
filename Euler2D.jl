@@ -239,8 +239,8 @@ function update_physical_fluxes!(flux, Q)
 end
 
 function update_smoothnessfunctions!(smooth, Q, α)
-    @. smooth.G₊ = Q.ρ + Q.ρ * (Q.u^2 + Q.v^2) + Q.P + α * Q.ρ * (Q.u + Q.v)
-    @. smooth.G₋ = Q.ρ + Q.ρ * (Q.u^2 + Q.v^2) + Q.P - α * Q.ρ * (Q.u + Q.v)
+    @. smooth.G₊ = Q.ρ + Q.E + α * Q.ρ * (Q.u + Q.v)
+    @. smooth.G₋ = Q.ρ + Q.E - α * Q.ρ * (Q.u + Q.v)
 end
 
 function update_xeigenvectors!(i, j, Q, flxrec, γ)
@@ -497,15 +497,15 @@ function plot_system(q, sys, titlename, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
-                        fill=true, linecolor=:plasma, levels=30, aspect_ratio=1.0)
+                        fill=false, linecolor=:plasma, levels=30, aspect_ratio=1.0)
     display(plt)
     # Plots.pdf(plt, filename)
 end
 
 function euler(; γ=7/5, cfl=0.6, t_max=1.0)
-    gridx = grid(size=256, min=0.0, max=1.0)
-    gridy = grid(size=256, min=0.0, max=1.0)
-    sys = SystemParameters2D(gridx, gridy, γ)
+    gridx = grid(size=128, min=0.0, max=1.0)
+    gridy = grid(size=128, min=0.0, max=1.0)
+    sys = SystemParameters2D(gridx, gridy, 2, 4, γ)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
     wepar = Weno.preallocate_weno_parameters()
     state = preallocate_statevectors(sys)
@@ -612,4 +612,4 @@ function euler(; γ=7/5, cfl=0.6, t_max=1.0)
 end
 
 # BenchmarkTools.@btime euler(t_max=0.01);
-@time euler(t_max=0.2)
+@time euler(t_max=0.3)
