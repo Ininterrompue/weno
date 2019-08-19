@@ -276,15 +276,11 @@ function update_xeigenvectors!(i, state, flxrec, sys)
     Rx[6, 7] = a * αs * βz / sqrt(ρ)
     Rx[7, 7] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) + Γf
 
-    flxrec.Lx = inv(Rx)
-    return
-
-    # issues with using L directly
     Lx[1, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) + Γf)
     Lx[1, 2] = oneover2a2 * ((1-γ) * αf * u - αf * cf)
     Lx[1, 3] = oneover2a2 * ((1-γ) * αf * v + cs * αs * βy * sign(Bx))
     Lx[1, 4] = oneover2a2 * ((1-γ) * αf * w + cs * αs * βz * sign(Bx))
-    Lx[1, 5] = oneover2a2 * ((1-γ) * αf * By - sqrt(ρ) * a * αs * βy)
+    Lx[1, 5] = oneover2a2 * ((1-γ) * αf * By + sqrt(ρ) * a * αs * βy) # +
     Lx[1, 6] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
     Lx[1, 7] = oneover2a2 * ((γ-1) * αf)
 
@@ -328,7 +324,7 @@ function update_xeigenvectors!(i, state, flxrec, sys)
     Lx[7, 2] = oneover2a2 * ((1-γ) * αf * u + αf * cf)
     Lx[7, 3] = oneover2a2 * ((1-γ) * αf * v - cs * αs * βy * sign(Bx))
     Lx[7, 4] = oneover2a2 * ((1-γ) * αf * w - cs * αs * βz * sign(Bx))
-    Lx[7, 5] = oneover2a2 * ((1-γ) * αf * By - sqrt(ρ) * a * αs * βy)
+    Lx[7, 5] = oneover2a2 * ((1-γ) * αf * By + sqrt(ρ) * a * αs * βy)
     Lx[7, 6] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
     Lx[7, 7] = oneover2a2 * ((γ-1) * αf)
 end
@@ -407,7 +403,7 @@ end
 
 
 function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
-    gridx = grid(size=512, min=-1.0, max=1.0)
+    gridx = grid(size=256, min=-1.0, max=1.0)
     sys = SystemParameters1D(gridx, 5, 7, γ)
     rkpar = Weno.preallocate_rungekutta_parameters(gridx)
     wepar = Weno.preallocate_weno_parameters()
@@ -467,9 +463,10 @@ function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
         conserved_to_primitive!(state, sys)
 
         counter += 1
-        if counter % 1000 == 0
+        if counter % 200 == 0
             @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
                 counter, t, dt, wepar.ev, time() - t0)
+            # plot_system(state, sys, "briowu1_512_ada")
         end
     end
 

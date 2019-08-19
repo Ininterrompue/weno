@@ -1,6 +1,6 @@
 module Weno
 
-export diagonalize_jacobian!, update_numerical_flux, fhatp, fhatm
+export diagonalize_jacobian!, update_numerical_fluxes!, fhatp, fhatm
 export nonlinear_weights_plus!, nonlinear_weights_minus!, update_switches!
 export preallocate_rungekutta_parameters, preallocate_weno_parameters
 export weno_scheme!, runge_kutta!
@@ -65,6 +65,13 @@ function preallocate_rungekutta_parameters(gridx, gridy)
     return RungeKuttaParameters(op, u1, u2, u3)
 end
 
+function preallocate_rungekutta_parameters(gridx, gridy, sys)
+    for x in [:op, :u1, :u2, :u3]
+        @eval $x = zeros($gridx.nx, $gridy.nx, $sys.ncons)
+    end
+    return RungeKuttaParameters(op, u1, u2, u3)
+end
+
 function preallocate_weno_parameters()
     fp = zeros(6)
     fm = zeros(6)
@@ -121,6 +128,16 @@ end
 # Lax-Friderichs flux splitting
 fplus(u, f, α)  = 1/2 * (f + α*u)
 fminus(u, f, α) = 1/2 * (f - α*u)
+
+function update_numerical_fluxes!(i, j, F_hat, q, f, sys, w, ada)
+    for n in 1:sys.ncons
+        for k in 1:6
+            w.fp[k] = fplus(q[k, n], f[k, n], w.ev)
+            w.fm[k] = fminus(q[k, n], f[k, n], w.ev)
+        end
+        F_hat[i, j, n] = fhatp(w, ada) + fhatm(w, ada)
+    end
+end
 
 function update_numerical_flux(u, f, w, ada)
     @. w.fp = fplus(u, f, w.ev)
