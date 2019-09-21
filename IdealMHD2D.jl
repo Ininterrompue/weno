@@ -791,15 +791,15 @@ function plot_system(q, sys, titlename, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
-                        fill=false, linecolor=:plasma, levels=15, aspect_ratio=1.0)
+                        fill=false, linecolor=:plasma, levels=30, aspect_ratio=1.0)
     display(plt)
     # Plots.pdf(plt, filename)
 end
 
 
 function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
-    gridx = grid(size=64, min=0.0, max=2π)
-    gridy = grid(size=64, min=0.0, max=2π)
+    gridx = grid(size=256, min=0.0, max=2π)
+    gridy = grid(size=256, min=0.0, max=2π)
     sys = SystemParameters2D(gridx, gridy, 4, 8, γ)
     rApar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy)
     rkpar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy, sys)
@@ -907,8 +907,8 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
         counter += 1
         if counter % 100 == 0
-            @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f, detinv = %6.8f, detman = %6.8f\n", 
-                counter, t, dt, wepar.ev, time() - t0, opnorm(inv(flxrec.Ry)), opnorm(flxrec.Ly))
+            @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
+                counter, t, dt, wepar.ev, time() - t0)
             # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t3_ada")
         end
         # if t > t_array[t_counter]
@@ -940,4 +940,4 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
     # plot_system(T, sys, "T", "orszagtang_T_256x256_t4_char")
 end
 
-@time idealmhd(t_max=0.5)
+@time idealmhd(t_max=4.0)
