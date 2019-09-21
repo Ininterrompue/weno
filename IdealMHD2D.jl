@@ -325,8 +325,6 @@ function update_xeigenvectors!(i, j, state, flxrec, sys)
     Rx[7, 8] = a * αs * βz / sqrt(ρ)
     Rx[8, 8] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) + Γf
 
-    # flxrec.Lx = inv(Rx)
-
     Lx[1, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) + Γf)
     Lx[1, 2] = oneover2a2 * ((1-γ) * αf * u - αf * cf)
     Lx[1, 3] = oneover2a2 * ((1-γ) * αf * v + cs * αs * βy * sign(Bx))
@@ -420,7 +418,7 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
     τ  = (γ-1)/a^2
     Γf = αf * cf * v - αs * cs * sign(By) * (βx * u + βz * w)
     Γa = sign(By) * (βz * u - βx * w)
-    Γs = αs * cs * v + αf * cf * sign(By) * (βx * v + βz * w)
+    Γs = αs * cs * v + αf * cf * sign(By) * (βx * u + βz * w)
     oneover2a2 = 1/2a^2
     
     Ry[1, 1] = αf
@@ -476,33 +474,29 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
     Ry[7, 8] = a * αs * βz / sqrt(ρ)
     Ry[8, 8] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) + Γf
 
-    # flxrec.Ly = inv(Ry)
-    # return 
-
-    # Problems with Ly, not Lx
     Ly[1, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) + Γf)
     Ly[1, 2] = oneover2a2 * ((1-γ) * αf * v - αf * cf)
     Ly[1, 3] = oneover2a2 * ((1-γ) * αf * u + cs * αs * βx * sign(By))
     Ly[1, 4] = oneover2a2 * ((1-γ) * αf * w + cs * αs * βz * sign(By))
     Ly[1, 5] = oneover2a2 * ((1-γ) * αf * By)
-    Ly[1, 6] = oneover2a2 * ((1-γ) * αf * By + sqrt(ρ) * a * αs * βx) # +
+    Ly[1, 6] = oneover2a2 * ((1-γ) * αf * Bx + sqrt(ρ) * a * αs * βx) # +
     Ly[1, 7] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
     Ly[1, 8] = oneover2a2 * ((γ-1) * αf)
 
-    Ly[2, 1] = 1/2 * Γa
-    Ly[2, 3] = 1/2 * -βz * sign(By)
-    Ly[2, 4] = 1/2 * +βx * sign(By)
-    Ly[2, 6] = 1/2 * -sqrt(ρ) * βz
-    Ly[2, 7] = 1/2 * +sqrt(ρ) * βx
+    Ly[3, 1] = 1/2 * Γa
+    Ly[3, 3] = 1/2 * -βz * sign(By)
+    Ly[3, 4] = 1/2 * +βx * sign(By)
+    Ly[3, 6] = 1/2 * -sqrt(ρ) * βz
+    Ly[3, 7] = 1/2 * +sqrt(ρ) * βx
 
-    Ly[3, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) + Γs)
-    Ly[3, 2] = oneover2a2 * ((1-γ) * αs * v - αs * cs)
-    Ly[3, 3] = oneover2a2 * ((1-γ) * αs * u - cf * αf * βx * sign(By))
-    Ly[3, 4] = oneover2a2 * ((1-γ) * αs * w - cf * αf * βz * sign(By))
-    Ly[3, 5] = oneover2a2 * ((1-γ) * αs * By)
-    Ly[3, 6] = oneover2a2 * ((1-γ) * αs * By - sqrt(ρ) * a * αf * βx)
-    Ly[3, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
-    Ly[3, 8] = oneover2a2 * ((γ-1) * αs)
+    Ly[2, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) + Γs)
+    Ly[2, 2] = oneover2a2 * ((1-γ) * αs * v - αs * cs)
+    Ly[2, 3] = oneover2a2 * ((1-γ) * αs * u - cf * αf * βx * sign(By))
+    Ly[2, 4] = oneover2a2 * ((1-γ) * αs * w - cf * αf * βz * sign(By))
+    Ly[2, 5] = oneover2a2 * ((1-γ) * αs * By)
+    Ly[2, 6] = oneover2a2 * ((1-γ) * αs * Bx - sqrt(ρ) * a * αf * βx)
+    Ly[2, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
+    Ly[2, 8] = oneover2a2 * ((γ-1) * αs)
 
     Ly[4, 1] = 1 - 1/2 * τ * mag2(u, v, w)
     Ly[4, 2] = τ * v
@@ -513,16 +507,16 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
     Ly[4, 7] = τ * Bz
     Ly[4, 8] = -τ
 
-    Ly[5, 5] = 1.0 
+    Ly[6, 5] = 1.0 
 
-    Ly[6, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) - Γs)
-    Ly[6, 2] = oneover2a2 * ((1-γ) * αs * v + αs * cs)
-    Ly[6, 3] = oneover2a2 * ((1-γ) * αs * u + cf * αf * βx * sign(By))
-    Ly[6, 4] = oneover2a2 * ((1-γ) * αs * w + cf * αf * βz * sign(By))
-    Ly[6, 5] = oneover2a2 * ((1-γ) * αs * By)
-    Ly[6, 6] = oneover2a2 * ((1-γ) * αs * By - sqrt(ρ) * a * αf * βx)
-    Ly[6, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
-    Ly[6, 8] = oneover2a2 * ((γ-1) * αs)
+    Ly[5, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) - Γs)
+    Ly[5, 2] = oneover2a2 * ((1-γ) * αs * v + αs * cs)
+    Ly[5, 3] = oneover2a2 * ((1-γ) * αs * u + cf * αf * βx * sign(By))
+    Ly[5, 4] = oneover2a2 * ((1-γ) * αs * w + cf * αf * βz * sign(By))
+    Ly[5, 5] = oneover2a2 * ((1-γ) * αs * By)
+    Ly[5, 6] = oneover2a2 * ((1-γ) * αs * Bx - sqrt(ρ) * a * αf * βx)
+    Ly[5, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
+    Ly[5, 8] = oneover2a2 * ((γ-1) * αs)
 
     Ly[7, 1] = 1/2 * Γa
     Ly[7, 3] = 1/2 * -βz * sign(By)
@@ -535,7 +529,7 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
     Ly[8, 3] = oneover2a2 * ((1-γ) * αf * u - cs * αs * βx * sign(By))
     Ly[8, 4] = oneover2a2 * ((1-γ) * αf * w - cs * αs * βz * sign(By))
     Ly[8, 5] = oneover2a2 * ((1-γ) * αf * By)
-    Ly[8, 6] = oneover2a2 * ((1-γ) * αf * By + sqrt(ρ) * a * αs * βx) # +
+    Ly[8, 6] = oneover2a2 * ((1-γ) * αf * Bx + sqrt(ρ) * a * αs * βx) # +
     Ly[8, 7] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
     Ly[8, 8] = oneover2a2 * ((γ-1) * αf)
 end
@@ -842,55 +836,55 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
         # end
 
         # Characteristic-wise reconstruction
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_xeigenvectors!(i, j, state, flxrec, sys)
-        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-        #     Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-        #     project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_yeigenvectors!(i, j, state, flxrec, sys)
-        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-        #     Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-        #     project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        # end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_xeigenvectors!(i, j, state, flxrec, sys)
+            project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+            update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+            Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+            project_to_realspace!(i, j, flux, flxrec, sys, :X)
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_yeigenvectors!(i, j, state, flxrec, sys)
+            project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+            update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+            Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+            project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        end
 
         # AdaWENO scheme
-        update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
-            Weno.nonlinear_weights_plus!(wepar)
-            Weno.nonlinear_weights_minus!(wepar)
-            Weno.update_switches!(wepar)
-            if wepar.θp > 0.5 && wepar.θm > 0.5
-                update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-                Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
-            else
-                update_xeigenvectors!(i, j, state, flxrec, sys)
-                project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-                update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-                Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-                project_to_realspace!(i, j, flux, flxrec, sys, :X)
-            end
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
-            Weno.nonlinear_weights_plus!(wepar)
-            Weno.nonlinear_weights_minus!(wepar)
-            Weno.update_switches!(wepar)
-            if wepar.θp > 0.5 && wepar.θm > 0.5
-                update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-                Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
-            else
-                update_yeigenvectors!(i, j, state, flxrec, sys)
-                project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-                update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-                Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-                project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-            end
-        end
+        # update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
+        #     Weno.nonlinear_weights_plus!(wepar)
+        #     Weno.nonlinear_weights_minus!(wepar)
+        #     Weno.update_switches!(wepar)
+        #     if wepar.θp > 0.5 && wepar.θm > 0.5
+        #         update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+        #         Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
+        #     else
+        #         update_xeigenvectors!(i, j, state, flxrec, sys)
+        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+        #         update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+        #         Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+        #         project_to_realspace!(i, j, flux, flxrec, sys, :X)
+        #     end
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
+        #     Weno.nonlinear_weights_plus!(wepar)
+        #     Weno.nonlinear_weights_minus!(wepar)
+        #     Weno.update_switches!(wepar)
+        #     if wepar.θp > 0.5 && wepar.θm > 0.5
+        #         update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+        #         Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
+        #     else
+        #         update_yeigenvectors!(i, j, state, flxrec, sys)
+        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+        #         update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+        #         Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+        #         project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        #     end
+        # end
 
         for j in gridy.cr_mesh, i in gridx.cr_mesh
             update_local_Az_derivatives!(i, j, state, sys, wepar, :X)
@@ -913,8 +907,8 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
         counter += 1
         if counter % 100 == 0
-            @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
-                counter, t, dt, wepar.ev, time() - t0)
+            @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f, detinv = %6.8f, detman = %6.8f\n", 
+                counter, t, dt, wepar.ev, time() - t0, opnorm(inv(flxrec.Ry)), opnorm(flxrec.Ly))
             # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t3_ada")
         end
         # if t > t_array[t_counter]
@@ -936,14 +930,14 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
 
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
-    plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t4_char")
-    plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t4_char")
-    plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t4_char")
-    plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t4_char")
-    plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t4_char")
+    # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t4_char")
+    # plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t4_char")
+    # plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t4_char")
+    # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t4_char")
+    # plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t4_char")
 
-    T = calculate_temperature(state, sys)
-    plot_system(T, sys, "T", "orszagtang_T_256x256_t4_char")
+    # T = calculate_temperature(state, sys)
+    # plot_system(T, sys, "T", "orszagtang_T_256x256_t4_char")
 end
 
 @time idealmhd(t_max=0.5)
