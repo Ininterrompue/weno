@@ -369,19 +369,12 @@ function project_to_realspace!(i, flux, flxrec, sys)
     end
 end
 
-function update_numerical_fluxes!(i, Fx_hat, q, f, sys, wepar, ada)
-    for n in 1:sys.ncons
-        Fx_hat[i, n] = Weno.update_numerical_flux(@view(q[:, n]), @view(f[:, n]), wepar, ada)
-    end
-end
-
 function time_evolution!(state, flux, sys, dt, rkpar)
-    for n in 1:sys.ncons
-        for i in sys.gridx.cr_mesh
-            rkpar.op[i] = Weno.weno_scheme(flux.Fx_hat[i, n], flux.Fx_hat[i-1, n], sys.gridx, rkpar)
-        end
-        Weno.runge_kutta!(@view(state.Q_cons[:, n]), dt, rkpar)
+    for n in 1:sys.ncons, i in sys.gridx.cr_mesh
+        rkpar.op[i, n] = Weno.weno_scheme(flux.Fx_hat[i, n], 
+            flux.Fx_hat[i-1, n], sys.gridx, rkpar)
     end
+    Weno.runge_kutta!(state.Q_cons, dt, rkpar)
 end
 
 function plot_system(state, sys, filename)
@@ -405,7 +398,7 @@ end
 function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
     gridx = grid(size=256, min=-1.0, max=1.0)
     sys = SystemParameters1D(gridx, 5, 7, γ)
-    rkpar = Weno.preallocate_rungekutta_parameters(gridx)
+    rkpar = Weno.preallocate_rungekutta_parameters_1D(gridx, sys)
     wepar = Weno.preallocate_weno_parameters()
     state = preallocate_statevectors(sys)
     flux = preallocate_fluxes(sys)
@@ -428,7 +421,7 @@ function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
         # Component-wise reconstruction
         # for i in gridx.cr_cell
         #     update_local!(i, state.Q_cons, flux.Fx, q, f, sys)
-        #     update_numerical_fluxes!(i, flux.Fx_hat, q, f, sys, wepar, false)
+        #     Weno.update_numerical_fluxes!(i, flux.Fx_hat, q, f, sys, wepar, false)
         # end
 
         # Characteristic-wise reconstruction
@@ -436,7 +429,7 @@ function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
         #     update_xeigenvectors!(i, state, flxrec, sys)
         #     project_to_localspace!(i, state, flux, flxrec, sys)
         #     update_local!(i, state.Q_proj, flux.Gx, q, f, sys)
-        #     update_numerical_fluxes!(i, flux.Gx_hat, q, f, sys, wepar, false)
+        #     Weno.update_numerical_fluxes!(i, flux.Gx_hat, q, f, sys, wepar, false)
         #     project_to_realspace!(i, flux, flxrec, sys)
         # end
 
@@ -449,12 +442,12 @@ function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
             Weno.update_switches!(wepar)
             if wepar.θp > 0.5 && wepar.θm > 0.5
                 update_local!(i, state.Q_cons, flux.Fx, q, f, sys)
-                update_numerical_fluxes!(i, flux.Fx_hat, q, f, sys, wepar, true)
+                Weno.update_numerical_fluxes!(i, flux.Fx_hat, q, f, sys, wepar, true)
             else
                 update_xeigenvectors!(i, state, flxrec, sys)
                 project_to_localspace!(i, state, flux, flxrec, sys)
                 update_local!(i, state.Q_proj, flux.Gx, q, f, sys)
-                update_numerical_fluxes!(i, flux.Gx_hat, q, f, sys, wepar, false)
+                Weno.update_numerical_fluxes!(i, flux.Gx_hat, q, f, sys, wepar, false)
                 project_to_realspace!(i, flux, flxrec, sys)
             end
         end
@@ -476,5 +469,4 @@ function idealmhd(; γ=2.0, cfl=0.6, t_max=0.0)
 end
 
 @time idealmhd(t_max=0.2)
-
                     

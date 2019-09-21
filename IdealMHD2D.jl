@@ -476,8 +476,8 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
     Ry[7, 8] = a * αs * βz / sqrt(ρ)
     Ry[8, 8] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) + Γf
 
-    flxrec.Ly = inv(Ry)
-    return 
+    # flxrec.Ly = inv(Ry)
+    # return 
 
     # Problems with Ly, not Lx
     Ly[1, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) + Γf)
@@ -797,18 +797,18 @@ function plot_system(q, sys, titlename, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
-                        fill=false, linecolor=:plasma, levels=30, aspect_ratio=1.0)
+                        fill=false, linecolor=:plasma, levels=15, aspect_ratio=1.0)
     display(plt)
     # Plots.pdf(plt, filename)
 end
 
 
 function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
-    gridx = grid(size=128, min=0.0, max=2π)
-    gridy = grid(size=128, min=0.0, max=2π)
+    gridx = grid(size=64, min=0.0, max=2π)
+    gridy = grid(size=64, min=0.0, max=2π)
     sys = SystemParameters2D(gridx, gridy, 4, 8, γ)
-    rApar = Weno.preallocate_rungekutta_parameters(gridx, gridy)
-    rkpar = Weno.preallocate_rungekutta_parameters(gridx, gridy, sys)
+    rApar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy)
+    rkpar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy, sys)
     wepar = Weno.preallocate_weno_parameters()
     state = preallocate_statevectors(sys)
     flux = preallocate_fluxes(sys)
@@ -842,55 +842,55 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
         # end
 
         # Characteristic-wise reconstruction
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_xeigenvectors!(i, j, state, flxrec, sys)
-            project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-            update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-            Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-            project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_yeigenvectors!(i, j, state, flxrec, sys)
-            project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-            update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-            Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-            project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_xeigenvectors!(i, j, state, flxrec, sys)
+        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+        #     Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+        #     project_to_realspace!(i, j, flux, flxrec, sys, :X)
+        # end
+        # for j in gridy.cr_cell, i in gridx.cr_cell
+        #     update_yeigenvectors!(i, j, state, flxrec, sys)
+        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+        #     Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+        #     project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        # end
 
         # AdaWENO scheme
-        # update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
-        #     Weno.nonlinear_weights_plus!(wepar)
-        #     Weno.nonlinear_weights_minus!(wepar)
-        #     Weno.update_switches!(wepar)
-        #     if wepar.θp > 0.5 && wepar.θm > 0.5
-        #         update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
-        #     else
-        #         update_xeigenvectors!(i, j, state, flxrec, sys)
-        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-        #         update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-        #         project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        #     end
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
-        #     Weno.nonlinear_weights_plus!(wepar)
-        #     Weno.nonlinear_weights_minus!(wepar)
-        #     Weno.update_switches!(wepar)
-        #     if wepar.θp > 0.5 && wepar.θm > 0.5
-        #         update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
-        #     else
-        #         update_yeigenvectors!(i, j, state, flxrec, sys)
-        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-        #         update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-        #         project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        #     end
-        # end
+        update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
+            Weno.nonlinear_weights_plus!(wepar)
+            Weno.nonlinear_weights_minus!(wepar)
+            Weno.update_switches!(wepar)
+            if wepar.θp > 0.5 && wepar.θm > 0.5
+                update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+                Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
+            else
+                update_xeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+                update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+                Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :X)
+            end
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
+            Weno.nonlinear_weights_plus!(wepar)
+            Weno.nonlinear_weights_minus!(wepar)
+            Weno.update_switches!(wepar)
+            if wepar.θp > 0.5 && wepar.θm > 0.5
+                update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+                Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
+            else
+                update_yeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+                update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+                Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+            end
+        end
 
         for j in gridy.cr_mesh, i in gridx.cr_mesh
             update_local_Az_derivatives!(i, j, state, sys, wepar, :X)
@@ -946,4 +946,4 @@ function idealmhd(; γ=5/3, cfl=0.4, t_max=0.0)
     plot_system(T, sys, "T", "orszagtang_T_256x256_t4_char")
 end
 
-@time idealmhd(t_max=2.0)
+@time idealmhd(t_max=0.5)
