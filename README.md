@@ -4,7 +4,7 @@ This repository seeks to make use of the weighted essentially non-oscillatory (W
 
 We use the 3rd order TVD Runge-Kutta method for the temporal discretization and the 5th order WENO scheme for the spatial discretization<sup>5</sup>. The nonlinear weights are calculated using smoothness indicators defined by Yamaleev and Carpenter<sup>6</sup>, which improves upon the accuracy of the scheme at shocks and discontinuous points as compared with those weights defined in Jiang and Shu<sup>2</sup>.
 
-We have written solvers for Burgers' equation, Euler equations, and ideal MHD equations<sup>7</sup> in 1D and 2D. The following extensions are proposed: Euler with source terms (e.g. for Rayleigh-Taylor instabilities), shallow water equations<sup>8</sup>, ideal MHD, Hall MHD<sup>9</sup>, curvilinear coordinates<sup>10</sup>.
+We have written solvers for Burgers' equation, Euler equations, and ideal MHD equations<sup>7</sup> in 1D and 2D. The following extensions are proposed: Euler with source terms (e.g. for Rayleigh-Taylor instabilities), shallow water equations<sup>8</sup>, Hall MHD<sup>9</sup>, curvilinear coordinates<sup>10</sup>.
 
 ## References
 1. X. D. Liu, S. Osher, and T. Chan, *J. Comput. Phys.* **115**:200-212 (1994).

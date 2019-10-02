@@ -1,6 +1,6 @@
 include("./System.jl")
 include("./Weno.jl")
-using Printf, LinearAlgebra
+using Printf
 import Plots, BenchmarkTools
 import Base.sign
 Plots.pyplot()
@@ -31,11 +31,11 @@ struct Fluxes{T}
     Gx_hat::Array{T, 3}   # numerical flux, characteristic space
     Gy_hat::Array{T, 3}
     Az_x::Array{T, 3}     # x-derivative of Az, 1 → +, 2 → -
-    Az_y::Array{T, 3}     # x-derivative of Az, 1 → +, 2 → -
+    Az_y::Array{T, 3}     # y-derivative of Az, 1 → +, 2 → -
     F_local::Matrix{T}    # local physical flux, real space
 end
 
-mutable struct FluxReconstruction{T}
+struct FluxReconstruction{T}
     Q_avgprim::Array{T, 3}   # averaged nonconserved quantities
     Q_avgcons::Array{T, 3}   # averaged conserved quantities
     Lx::Matrix{T}            # left eigenvectors
@@ -66,7 +66,7 @@ function preallocate_fluxes(sys)
     nx = sys.gridx.nx; ny = sys.gridy.nx;
     ncons = sys.ncons
     Fx = zeros(nx, ny, ncons); Fy = zeros(nx, ny, ncons)
-    Gx = zeros(nx, ny, ncons); Gy = zeros(nx, ny, ncons);
+    Gx = zeros(nx, ny, ncons); Gy = zeros(nx, ny, ncons)
     Fx_hat = zeros(nx+1, ny+1, ncons); Fy_hat = zeros(nx+1, ny+1, ncons)
     Gx_hat = zeros(nx+1, ny+1, ncons); Gy_hat = zeros(nx+1, ny+1, ncons)
     Az_x = zeros(nx, ny, 2); Az_y = zeros(nx, ny, 2)
