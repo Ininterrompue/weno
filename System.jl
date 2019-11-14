@@ -22,6 +22,7 @@ struct SystemParameters2D{T, S}
     nprim::S
     ncons::S
     γ::T
+    A_A::T
 end
 
 function grid(; size=32, min=-1.0, max=1.0, ghost=3)
