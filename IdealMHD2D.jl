@@ -8,7 +8,6 @@ Plots.pyplot()
 
 abstract type BoundaryCondition end
 struct Periodic <: BoundaryCondition end
-struct SemiPeriodic <: BoundaryCondition end
 
 """
 Primitive: (u, v, w, P)
@@ -102,28 +101,6 @@ It is important that sign is defined so that sign(0) = 1 to avoid singular eigen
 sign(x::Real) = x >= 0 ? oneunit(x) : x/abs(x)
 
 """
-Orszag-Tang vortex
-(x, y) = [0, 2π] × [0, 2π], t_max = 2, 3, 4
-"""
-function orszagtang!(state, sys)
-    γ = sys.γ; Az = state.Az
-    Q_prim = state.Q_prim; Q_cons = state.Q_cons
-    nx = sys.gridx.nx; ny = sys.gridy.nx
-
-    for j in 1:ny, i in 1:nx
-        x = sys.gridx.x[i]
-        y = sys.gridy.x[j]
-        Q_cons[i, j, 1] = γ^2       # ρ
-        Q_prim[i, j, 4] = γ         # P
-        Q_prim[i, j, 1] = -sin(y)   # u
-        Q_prim[i, j, 2] = +sin(x)   # v
-        Q_cons[i, j, 5] = -sin(y)   # Bx
-        Q_cons[i, j, 6] = sin(2x)   # By
-        Az[i, j] = 1/2 * cos(2x) + cos(y)
-    end
-end
-
-"""
 MHD current sheet
 (x, y) = [0, 2] × [0, 2], t_max = 10
 """
@@ -148,42 +125,6 @@ function currentsheet!(state, sys)
             Az[i, j] = -x + 2.5
         end
     end
-end
-
-"""
-MHD wave test
-(x, y) = [-1, 1] × [-1, 1], t_max = 0.5
-"""
-function mhd_alfvenwave!(state, sys)
-    γ = sys.γ; A_A = sys.A_A; Az = state.Az
-    Q_prim = state.Q_prim; Q_cons = state.Q_cons
-    nx = sys.gridx.nx; ny = sys.gridy.nx
-
-    for j in 1:ny, i in 1:nx
-        x = sys.gridx.x[i]
-        y = sys.gridy.x[j]
-        Q_cons[i, j, 1] = 1.0   # ρ
-        Q_prim[i, j, 4] = 1/γ   # P
-        Q_prim[i, j, 2] = A_A * cos(2π*x)       # v
-        Q_cons[i, j, 5] = 1.0   # Bx
-        Q_cons[i, j, 6] = -A_A * cos(2π*x)      # By
-        Az[i, j] = y + 1/2π * A_A * sin(2π*x)   # Az
-    end
-end
-
-function mhd_alfvenwave_error(sys, state, t)
-    nx = sys.gridx.nx; ny = sys.gridy.nx
-    cry = sys.gridy.cr_mesh; crx = sys.gridx.cr_mesh
-    By = zeros(nx, ny)
-    error = 0.0
-    for j in 1:ny, i in 1:nx
-        x = sys.gridx.x[i]
-        By[i, j] = -sys.A_A * cos(2π*(x-t))
-    end
-    for j in cry, i in crx
-        error += (state.Q_cons[i, j, 6] - By[i, j])^2 / (nx * ny)
-    end
-    return error
 end
 
 function primitive_to_conserved!(state, sys)
@@ -239,7 +180,7 @@ function slow_magnetosonic(ρ, P, Bx, By, Bz, γ, dim)
     elseif dim == :Y 
         bn2 = By^2/ρ
     end
-    if abs((a2 + b2)^2 - 4a2 * bn2) < 1e-12
+    if (a2 + b2)^2 - 4a2 * bn2 < 0
         return 1/sqrt(2) * sqrt(a2 + b2)
     else
         return 1/sqrt(2) * sqrt(a2 + b2 - sqrt((a2 + b2)^2 - 4a2 * bn2))
@@ -253,7 +194,7 @@ function fast_magnetosonic(ρ, P, Bx, By, Bz, γ, dim)
     elseif dim == :Y 
         bn2 = By^2/ρ
     end
-    if abs((a2 + b2)^2 - 4a2 * bn2) < 1e-12
+    if (a2 + b2)^2 - 4a2 * bn2 < 0
         return 1/sqrt(2) * sqrt(a2 + b2)
     else
         return 1/sqrt(2) * sqrt(a2 + b2 + sqrt((a2 + b2)^2 - 4a2 * bn2))
@@ -792,9 +733,6 @@ function boundary_conditions_conserved!(state, sys, bctype::Periodic)
     end
 end
 
-boundary_conditions_conserved!(state, sys, bctype::SemiPeriodic) = 
-    boundary_conditions_conserved!(state, sys, Periodic()) 
-
 function boundary_conditions_primitive!(state, sys, bctype::Periodic)
     Q_prim = state.Q_prim; nprim = sys.nprim
     nx = sys.gridx.nx; ny = sys.gridy.nx
@@ -816,9 +754,6 @@ function boundary_conditions_primitive!(state, sys, bctype::Periodic)
     end
 end
 
-boundary_conditions_primitive!(state, sys, bctype::SemiPeriodic) = 
-    boundary_conditions_primitive!(state, sys, Periodic())
-
 function boundary_conditions_Az!(state, sys, bctype::Periodic)
     Az = state.Az
     nx = sys.gridx.nx; ny = sys.gridy.nx
@@ -829,27 +764,6 @@ function boundary_conditions_Az!(state, sys, bctype::Periodic)
         Az[i, 3] = Az[i, end-3]
         Az[i, 2] = Az[i, end-4]
         Az[i, 1] = Az[i, end-5]
-    end
-    for j in 1:ny
-        Az[end-0, j] = Az[6, j]
-        Az[end-1, j] = Az[5, j]
-        Az[end-2, j] = Az[4, j]
-        Az[3, j] = Az[end-3, j]
-        Az[2, j] = Az[end-4, j]
-        Az[1, j] = Az[end-5, j]
-    end
-end
-
-function boundary_conditions_Az!(state, sys, bctype::SemiPeriodic)
-    Az = state.Az
-    nx = sys.gridx.nx; ny = sys.gridy.nx; y = sys.gridy.x
-    for i in 1:nx
-        Az[i, end-0] = Az[i, 6] + (y[end-0] - y[6])
-        Az[i, end-1] = Az[i, 5] + (y[end-1] - y[5])
-        Az[i, end-2] = Az[i, 4] + (y[end-2] - y[4])
-        Az[i, 3] = Az[i, end-3] + (y[3] - y[end-3])
-        Az[i, 2] = Az[i, end-4] + (y[2] - y[end-4])
-        Az[i, 1] = Az[i, end-5] + (y[1] - y[end-5])
     end
     for j in 1:ny
         Az[end-0, j] = Az[6, j]
@@ -913,27 +827,10 @@ function plot_system(q, sys, titlename, filename)
     # Plots.pdf(plt, filename)
 end
 
-function plot_alfvenwaves(sys, state, t_max)
-    A_A = sys.A_A
-    crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
-    By_analytical = zeros(sys.gridx.nx)
-    By_0 = zeros(sys.gridx.nx)
-    for i in crx
-        x = sys.gridx.x[i]
-        By_0[i] = -A_A * cos(2π*x)
-        By_analytical[i] = -A_A * cos(2π*(x - t_max))
-    end
-    By_numerical = state.Q_cons[:, sys.gridx.nx ÷ 2, 6]
-    # plt = Plots.plot(sys.gridx.x[crx], By_0[crx], label="By0")
-    # Plots.plot!(sys.gridx.x[crx], By_analytical[crx], label="ByA")
-    # Plots.plot!(sys.gridx.x[crx], By_numerical[crx], label="ByN")
-    plt = Plots.plot(sys.gridx.x, By_0, label="By0")
-    Plots.plot!(sys.gridx.x, By_analytical, label="ByA")
-    Plots.plot!(sys.gridx.x, By_numerical, label="ByN")
-    display(plt)
-end
-
-
+"""
+This function is not meant to be run. It is intended to be a template for test problems,
+and modifications to this function will be expected.
+"""
 function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     gridx = grid(size=grid_size, min=-1, max=1)
     gridy = grid(size=grid_size, min=-1, max=1)
@@ -946,13 +843,8 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     flxrec = preallocate_fluxreconstruction(sys)
     smooth = preallocate_smoothnessfunctions(sys)
 
-    # orszagtang!(state, sys)
-    # currentsheet!(state, sys)
-    # bctype = Periodic()
-
-    # MHD wave tests
-    mhd_alfvenwave!(state, sys)
-    bctype = SemiPeriodic()
+    currentsheet!(state, sys)
+    bctype = Periodic()
 
     primitive_to_conserved!(state, sys)
     boundary_conditions_primitive!(state, sys, bctype)
@@ -978,55 +870,55 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
         end
 
         # Characteristic-wise reconstruction
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_xeigenvectors!(i, j, state, flxrec, sys)
-        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-        #     update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-        #     Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-        #     project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_yeigenvectors!(i, j, state, flxrec, sys)
-        #     project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-        #     update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-        #     Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-        #     project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        # end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_xeigenvectors!(i, j, state, flxrec, sys)
+            project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+            update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+            Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+            project_to_realspace!(i, j, flux, flxrec, sys, :X)
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_yeigenvectors!(i, j, state, flxrec, sys)
+            project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+            update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+            Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+            project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        end
 
         # AdaWENO scheme
-        # update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
-        #     Weno.nonlinear_weights_plus!(wepar)
-        #     Weno.nonlinear_weights_minus!(wepar)
-        #     Weno.update_switches!(wepar)
-        #     if wepar.θp > 0.5 && wepar.θm > 0.5
-        #         update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
-        #     else
-        #         update_xeigenvectors!(i, j, state, flxrec, sys)
-        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-        #         update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-        #         project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        #     end
-        # end
-        # for j in gridy.cr_cell, i in gridx.cr_cell
-        #     update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
-        #     Weno.nonlinear_weights_plus!(wepar)
-        #     Weno.nonlinear_weights_minus!(wepar)
-        #     Weno.update_switches!(wepar)
-        #     if wepar.θp > 0.5 && wepar.θm > 0.5
-        #         update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
-        #     else
-        #         update_yeigenvectors!(i, j, state, flxrec, sys)
-        #         project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-        #         update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-        #         Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-        #         project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-        #     end
-        # end
+        update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
+            Weno.nonlinear_weights_plus!(wepar)
+            Weno.nonlinear_weights_minus!(wepar)
+            Weno.update_switches!(wepar)
+            if wepar.θp > 0.5 && wepar.θm > 0.5
+                update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+                Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
+            else
+                update_xeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+                update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+                Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :X)
+            end
+        end
+        for j in gridy.cr_cell, i in gridx.cr_cell
+            update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
+            Weno.nonlinear_weights_plus!(wepar)
+            Weno.nonlinear_weights_minus!(wepar)
+            Weno.update_switches!(wepar)
+            if wepar.θp > 0.5 && wepar.θm > 0.5
+                update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+                Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
+            else
+                update_yeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+                update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+                Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+            end
+        end
 
         for j in gridy.cr_mesh, i in gridx.cr_mesh
             update_local_Az_derivatives!(i, j, state, sys, wepar, :X)
@@ -1048,62 +940,42 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
         boundary_conditions_primitive!(state, sys, bctype)
 
         counter += 1
-        # if counter % 100 == 0
-        #     @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
-        #         counter, t, dt, wepar.ev, time() - t0)
-        #     # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t3_ada")
-        # end
-        # if t > t_array[t_counter]
-        #     plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t$(t_counter)_char")
-        #     plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t$(t_counter)_char")
-        #     plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t$(t_counter)_char")
-        #     plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t$(t_counter)_char")
-        #     plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t$(t_counter)_char")
+        if counter % 100 == 0
+            @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
+                counter, t, dt, wepar.ev, time() - t0)
+        end
+        if t > t_array[t_counter]
+            plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_256x256_t$(t_counter)_char")
+            plot_system(state.Q_prim[:, :, 4], sys, "P", "P_256x256_t$(t_counter)_char")
+            plot_system(state.Az, sys, "Az", "Az_256x256_t$(t_counter)_char")
+            plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_256x256_t$(t_counter)_char")
+            plot_system(state.Q_cons[:, :, 6], sys, "By", "By_256x256_t$(t_counter)_char")
         
-        #     T = calculate_temperature(state, sys)
-        #     plot_system(T, sys, "T", "orszagtang_T_256x256_t$(t_counter)_char")
+            T = calculate_temperature(state, sys)
+            plot_system(T, sys, "T", "T_256x256_t$(t_counter)_char")
 
-        #     divB = calculate_divergence(state, sys)
-        #     plot_system(divB, sys, "divB", "orszagtang_divB_256x256_t$(t_counter)_char")
+            divB = calculate_divergence(state, sys)
+            plot_system(divB, sys, "divB", "divB_256x256_t$(t_counter)_char")
 
-        #     t_counter += 1
-        # end
+            t_counter += 1
+        end
     end
-    @show t_max
-    # @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
-    #     counter, t, time() - t0)
-    plot_alfvenwaves(sys, state, t_max)
+    @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
+        counter, t, time() - t0)
     
-    # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t4_char")
-    # plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t4_char")
-    # plot_system(state.Q_prim[:, :, 1], sys, "u", "")
-    # plot_system(state.Q_prim[:, :, 2], sys, "v", "")
-    # plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t4_char")
-    # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t4_char")
-    # plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t4_char")
+    plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_256x256_t4_char")
+    plot_system(state.Q_prim[:, :, 4], sys, "P", "P_256x256_t4_char")
+    plot_system(state.Q_prim[:, :, 1], sys, "u", "")
+    plot_system(state.Q_prim[:, :, 2], sys, "v", "")
+    plot_system(state.Az, sys, "Az", "Az_256x256_t4_char")
+    plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_256x256_t4_char")
+    plot_system(state.Q_cons[:, :, 6], sys, "By", "By_256x256_t4_char")
 
-    # T = calculate_temperature(state, sys)
-    # plot_system(T, sys, "T", "orszagtang_T_256x256_t4_char")
+    T = calculate_temperature(state, sys)
+    plot_system(T, sys, "T", "T_256x256_t4_char")
 
-    # Jz = calculate_currentdensity(state, sys)
-    # plot_system(Jz, sys, "Jz", "currentsheet_Jz_64x64_t10_char")
-    return mhd_alfvenwave_error(sys, state, t_max)
-end
-
-function mhd_alfvenwave_test()
-    grid_size_array = [16, 32, 48, 64]
-    error_array = zeros(length(grid_size_array))
-
-    for i in 1:length(grid_size_array)
-        size = grid_size_array[i]
-        @show size
-        error_array[i] = idealmhd(grid_size=size, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.05)
-        @show error_array[i]
-    end
-
-    plt = Plots.plot(grid_size_array, error_array, title="Grid error", label="A_A=1e-2")
-    display(plt)
+    Jz = calculate_currentdensity(state, sys)
+    plot_system(Jz, sys, "Jz", "Jz_64x64_t10_char")
 end
 
 # @time idealmhd(t_max=0.25)
-mhd_alfvenwave_test()
