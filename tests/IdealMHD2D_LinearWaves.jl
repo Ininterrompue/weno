@@ -6,7 +6,7 @@ struct SemiPeriodic <: BoundaryCondition end
 MHD wave test
 (x, y) = [-1, 1] × [-1, 1], t_max = 0.5
 """
-function mhd_alfvenwave!(state, sys)
+function alfvenwave!(state, sys)
     γ = sys.γ; A_A = sys.A_A; Az = state.Az
     Q_prim = state.Q_prim; Q_cons = state.Q_cons
     nx = sys.gridx.nx; ny = sys.gridy.nx
@@ -23,7 +23,7 @@ function mhd_alfvenwave!(state, sys)
     end
 end
 
-function mhd_alfvenwave_error(sys, state, t)
+function alfvenwave_error(sys, state, t)
     nx = sys.gridx.nx; ny = sys.gridy.nx
     cry = sys.gridy.cr_mesh; crx = sys.gridx.cr_mesh
     By = zeros(nx, ny)
@@ -36,6 +36,18 @@ function mhd_alfvenwave_error(sys, state, t)
         error += (state.Q_cons[i, j, 6] - By[i, j])^2 / (nx * ny)
     end
     return error
+end
+
+function alfvenwave_difference(sys, state, t)
+    A_A = sys.A_A
+    crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
+    By_analytical = zeros(sys.gridx.nx)
+    for i in crx
+        x = sys.gridx.x[i]
+        By_analytical[i] = -A_A * cos(2π*(x - t))
+    end
+    By_numerical = state.Q_cons[:, sys.gridx.nx ÷ 2, 6]
+    A_difference = maximum(By_numerical[crx] - By_analytical[crx])
 end
 
 boundary_conditions_conserved!(state, sys, bctype::SemiPeriodic) = 
@@ -76,12 +88,10 @@ function plot_alfvenwaves(sys, state, t_max)
         By_analytical[i] = -A_A * cos(2π*(x - t_max))
     end
     By_numerical = state.Q_cons[:, sys.gridx.nx ÷ 2, 6]
-    # plt = Plots.plot(sys.gridx.x[crx], By_0[crx], label="By0")
-    # Plots.plot!(sys.gridx.x[crx], By_analytical[crx], label="ByA")
-    # Plots.plot!(sys.gridx.x[crx], By_numerical[crx], label="ByN")
-    plt = Plots.plot(sys.gridx.x, By_0, markershape=:circle, label="By0")
-    Plots.plot!(sys.gridx.x, By_analytical, markershape=:circle, label="ByA")
-    Plots.plot!(sys.gridx.x, By_numerical, markershape=:circle, label="ByN")
+    By_difference = By_numerical - By_analytical
+    plt = Plots.plot(sys.gridx.x[crx], By_difference[crx], markershape=:circle, label="ByD")
+    Plots.plot!(sys.gridx.x[crx], By_analytical[crx], markershape=:circle, label="ByA")
+    Plots.plot!(sys.gridx.x[crx], By_numerical[crx], markershape=:circle, label="ByN")
     display(plt)
     # Plots.pdf(plt, filename)
 end
@@ -99,7 +109,7 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     flxrec = preallocate_fluxreconstruction(sys)
     smooth = preallocate_smoothnessfunctions(sys)
 
-    mhd_alfvenwave!(state, sys)
+    alfvenwave!(state, sys)
     bctype = SemiPeriodic()
 
     primitive_to_conserved!(state, sys)
@@ -159,7 +169,7 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
 
     @printf("%d grid size. %d iterations. t_max = %2.3f. Elapsed time = %3.3f.\n", 
         grid_size, counter, t, time() - t0)
-    # plot_alfvenwaves(sys, state, t_max)
+    plot_alfvenwaves(sys, state, t_max)
     
     # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "")
     # plot_system(state.Q_prim[:, :, 4], sys, "P", "")
@@ -169,23 +179,42 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "")
     # plot_system(state.Q_cons[:, :, 6], sys, "By", "")
 
-    return mhd_alfvenwave_error(sys, state, t_max)
+    # return alfvenwave_error(sys, state, t_max)
+    return alfvenwave_difference(sys, state, t_max)
 end
 
-function mhd_alfvenwave_test()
-    grid_size_array = [8, 16, 32, 48, 64]
-    A_A_exponents = [1, 2, 3, 4, 5, 6]
-    error_array = zeros(length(grid_size_array), length(A_A_exponents))
+function alfvenwave_test()
+    grid_size_range = 8:8:64
+    A_A_exponents = 1:5
+    error_array = zeros(length(grid_size_range), length(A_A_exponents))
 
-    for j in 1:length(A_A_exponents), i in 1:length(grid_size_array)
+    for j in 1:length(A_A_exponents), i in 1:length(grid_size_range)
         amplitude = 10.0^(-A_A_exponents[j])
-        size = grid_size_array[i]
+        size = grid_size_range[i]
         error_array[i, j] = idealmhd(grid_size=size, γ=5/3, A_A=amplitude, cfl=0.4, t_max=0.25)
     end
 
-    plt = Plots.plot(grid_size_array, error_array, yscale=:log10, title="Grid error")
+    plt = Plots.plot(grid_size_range, error_array, legend=false, 
+        markershape=:circle, yscale=:log10, title="Grid error")
     display(plt)
     Plots.pdf(plt, "test_linearwave_convergence")
 end
 
-mhd_alfvenwave_test()
+function alfvenwave_amplitudescaling()
+    A_A_exponents = -2:0.5:10
+    A_difference = zeros(length(A_A_exponents))
+
+    for i in 1:length(A_A_exponents)
+        amplitude = 2.0^(-A_A_exponents[i])
+        A_difference[i] = idealmhd(grid_size=64, γ=5/3, A_A=amplitude, cfl=0.4, t_max=0.25)
+    end
+    @show A_difference
+
+    plt = Plots.plot(2.0 .^(-1 * A_A_exponents), A_difference, legend=false, xscale=:log2, yscale=:log2,
+        markershape=:circle, title="Amplitude of ByN - ByA")
+    display(plt)
+    Plots.pdf(plt, "difference_amplitude_scaling")
+end
+
+alfvenwave_amplitudescaling()
+# alfvenwave_test()

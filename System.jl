@@ -29,7 +29,7 @@ function grid(; size=32, min=-1.0, max=1.0, ghost=3)
     nx = 2*ghost + size
     dx = (max-min)/size
     x::StepRangeLen{Float64, Float64, Float64} = 
-        min - (ghost - 1/2)*dx : dx : max + (ghost - 1/2)*dx
+        range(min - (ghost - 1/2)*dx, length=nx, step=dx)
     cr_mesh = ghost+1:nx-ghost
     cr_cell = ghost:nx-ghost
     return GridParameters(nx, dx, x, cr_mesh, cr_cell, ghost)

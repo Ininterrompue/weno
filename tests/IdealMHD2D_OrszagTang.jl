@@ -22,9 +22,9 @@ function orszagtang!(state, sys)
     end
 end
 
-function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0)
-    gridx = grid(size=grid_size, min=-1, max=1)
-    gridy = grid(size=grid_size, min=-1, max=1)
+function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
+    gridx = grid(size=grid_size, min=0, max=2π)
+    gridy = grid(size=grid_size, min=0, max=2π)
     sys = SystemParameters2D(gridx, gridy, 4, 8, γ, 0.0)
     rApar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy)
     rkpar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy, sys)
@@ -50,20 +50,64 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0)
         dt = CFL_condition(cfl, state, sys, wepar)
         t += dt
 
-        # Characteristic-wise reconstruction
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_xeigenvectors!(i, j, state, flxrec, sys)
-            project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-            update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-            Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-            project_to_realspace!(i, j, flux, flxrec, sys, :X)
-        end
-        for j in gridy.cr_cell, i in gridx.cr_cell
-            update_yeigenvectors!(i, j, state, flxrec, sys)
-            project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-            update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-            Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-            project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+        if method == :comp
+            for j in gridy.cr_cell, i in gridx.cr_cell
+                update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+                Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, false)
+            end
+            for j in gridy.cr_cell, i in gridx.cr_cell
+                update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+                Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, false)
+            end
+        elseif method == :char
+            for j in gridy.cr_cell, i in gridx.cr_cell
+                update_xeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+                update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+                Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :X)
+            end
+            for j in gridy.cr_cell, i in gridx.cr_cell
+                update_yeigenvectors!(i, j, state, flxrec, sys)
+                project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+                update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+                Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+                project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+            end
+        elseif method == :ada
+            update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
+            for j in gridy.cr_cell, i in gridx.cr_cell
+                update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
+                Weno.nonlinear_weights_plus!(wepar)
+                Weno.nonlinear_weights_minus!(wepar)
+                Weno.update_switches!(wepar)
+                if wepar.θp > 0.5 && wepar.θm > 0.5
+                    update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
+                    Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
+                else
+                    update_xeigenvectors!(i, j, state, flxrec, sys)
+                    project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
+                    update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
+                    Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
+                    project_to_realspace!(i, j, flux, flxrec, sys, :X)
+                end
+            end
+            for j in gridy.cr_cell, i in gridx.cr_cell
+                update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
+                Weno.nonlinear_weights_plus!(wepar)
+                Weno.nonlinear_weights_minus!(wepar)
+                Weno.update_switches!(wepar)
+                if wepar.θp > 0.5 && wepar.θm > 0.5
+                    update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
+                    Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
+                else
+                    update_yeigenvectors!(i, j, state, flxrec, sys)
+                    project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
+                    update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
+                    Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
+                    project_to_realspace!(i, j, flux, flxrec, sys, :Y)
+                end
+            end
         end
 
         for j in gridy.cr_mesh, i in gridx.cr_mesh
@@ -91,17 +135,17 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0)
                 counter, t, dt, wepar.ev, time() - t0)
         end
         # if t > t_array[t_counter]
-        #     plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t$(t_counter)_char")
-        #     plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t$(t_counter)_char")
-        #     plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t$(t_counter)_char")
-        #     plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t$(t_counter)_char")
-        #     plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t$(t_counter)_char")
+        #     plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
+        #     plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
+        #     plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
+        #     plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
+        #     plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
         
         #     T = calculate_temperature(state, sys)
-        #     plot_system(T, sys, "T", "orszagtang_T_256x256_t$(t_counter)_char")
+        #     plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 
         #     divB = calculate_divergence(state, sys)
-        #     plot_system(divB, sys, "divB", "orszagtang_divB_256x256_t$(t_counter)_char")
+        #     plot_system(divB, sys, "divB", "divB_$(grid_size)_t$(t_counter)_" * string(method))
 
         #     t_counter += 1
         # end
@@ -109,16 +153,16 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0)
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
     
-    # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "orszagtang_rho_256x256_t4_char")
-    # plot_system(state.Q_prim[:, :, 4], sys, "P", "orszagtang_P_256x256_t4_char")
-    # plot_system(state.Q_prim[:, :, 1], sys, "u", "")
-    # plot_system(state.Q_prim[:, :, 2], sys, "v", "")
-    # plot_system(state.Az, sys, "Az", "orszagtang_Az_256x256_t4_char")
-    # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "orszagtang_Bx_256x256_t4_char")
-    # plot_system(state.Q_cons[:, :, 6], sys, "By", "orszagtang_By_256x256_t4_char")
+    plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_system(state.Q_prim[:, :, 1], sys, "u", "u_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_system(state.Q_prim[:, :, 2], sys, "v", "v_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
 
-    # T = calculate_temperature(state, sys)
-    # plot_system(T, sys, "T", "orszagtang_T_256x256_t4_char")
+    T = calculate_temperature(state, sys)
+    plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 end
 
-@time idealmhd(grid_size=64, t_max=0.25)
+@time idealmhd(grid_size=128, t_max=2.0, method=:ada)
