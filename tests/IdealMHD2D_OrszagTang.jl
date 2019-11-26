@@ -22,6 +22,20 @@ function orszagtang!(state, sys)
     end
 end
 
+function plot_ρ(ρ_saved, sys, filename)
+    crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
+
+    ρ2 = ρ_saved[sys.gridx.cr_mesh, sys.gridy.cr_mesh, 2] |> transpose
+    ρ4 = ρ_saved[sys.gridx.cr_mesh, sys.gridy.cr_mesh, 4] |> transpose
+    plt2 = Plots.contour(crx, cry, ρ2, fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0, 
+                         title="t = 2", showaxis=false, grid=false)
+    plt4 = Plots.contour(crx, cry, ρ4, fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0, 
+                         title="t = 4", showaxis=false, grid=false)
+    plt = Plots.plot(plt2, plt4, layout=(1, 2), legend=false)
+    display(plt)
+    Plots.png(plt, filename)
+end
+
 function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
     gridx = grid(size=grid_size, min=0, max=2π)
     gridy = grid(size=grid_size, min=0, max=2π)
@@ -45,6 +59,7 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
     t = 0.0; counter = 0; t0 = time()
     q = state.Q_local; f = flux.F_local
     t_array = [1.0, 2.0, 3.0, 4.0]; t_counter = 1
+    ρ_saved = zeros(sys.gridx.nx, sys.gridy.nx, 4)
     while t < t_max
         update_physical_fluxes!(flux, state, sys)
         dt = CFL_condition(cfl, state, sys, wepar)
@@ -134,35 +149,37 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
             @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
                 counter, t, dt, wepar.ev, time() - t0)
         end
-        # if t > t_array[t_counter]
-        #     plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
-        #     plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
-        #     plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
-        #     plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
-        #     plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
+        if t > t_array[t_counter]
+            ρ_saved[:, :, t_counter] = state.Q_cons[:, :, 1]
+            # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
+            # plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
+            # plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
+            # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
+            # plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
         
-        #     T = calculate_temperature(state, sys)
-        #     plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
+            # T = calculate_temperature(state, sys)
+            # plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 
-        #     divB = calculate_divergence(state, sys)
-        #     plot_system(divB, sys, "divB", "divB_$(grid_size)_t$(t_counter)_" * string(method))
+            # divB = calculate_divergenceB(state, sys)
+            # plot_system(divB, sys, "divB", "divB_$(grid_size)_t$(t_counter)_" * string(method))
 
-        #     t_counter += 1
-        # end
+            t_counter += 1
+        end
     end
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
     
-    plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
-    plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
-    plot_system(state.Q_prim[:, :, 1], sys, "u", "u_$(grid_size)_t$(t_counter)_" * string(method))
-    plot_system(state.Q_prim[:, :, 2], sys, "v", "v_$(grid_size)_t$(t_counter)_" * string(method))
-    plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
-    plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
-    plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
+    plot_ρ(ρ_saved, sys, "rho_$(grid_size)_prettyplot")
+    # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_max)_" * string(method))
+    # plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_max)_" * string(method))
+    # plot_system(state.Q_prim[:, :, 1], sys, "u", "u_$(grid_size)_t$(t_max)_" * string(method))
+    # plot_system(state.Q_prim[:, :, 2], sys, "v", "v_$(grid_size)_t$(t_max)_" * string(method))
+    # plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_max)_" * string(method))
+    # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_max)_" * string(method))
+    # plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_max)_" * string(method))
 
-    T = calculate_temperature(state, sys)
-    plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
+    # T = calculate_temperature(state, sys)
+    # plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 end
 
-@time idealmhd(grid_size=128, t_max=2.0, method=:ada)
+@time idealmhd(grid_size=128, t_max=4.0, method=:char)

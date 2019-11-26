@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/orszagtang/rho_128_prettyplot.png">
+</p>
+
 ## Overview
 
 This repository seeks to make use of the weighted essentially non-oscillatory (WENO) finite-difference schemes<sup>1,2</sup> to solve nonlinear hyperbolic PDEs. Our short-term goals are to generalize the AdaWENO scheme<sup>3</sup> to other systems, as well as solve systems with source terms<sup>4</sup>.

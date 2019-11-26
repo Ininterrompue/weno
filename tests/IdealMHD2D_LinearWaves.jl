@@ -170,6 +170,9 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     @printf("%d grid size. %d iterations. t_max = %2.3f. Elapsed time = %3.3f.\n", 
         grid_size, counter, t, time() - t0)
     plot_alfvenwaves(sys, state, t_max)
+
+    # divU = calculate_divergenceU(state, sys)
+    # plot_system(divU, sys, "divU", "")
     
     # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "")
     # plot_system(state.Q_prim[:, :, 4], sys, "P", "")
@@ -191,13 +194,13 @@ function alfvenwave_test()
     for j in 1:length(A_A_exponents), i in 1:length(grid_size_range)
         amplitude = 10.0^(-A_A_exponents[j])
         size = grid_size_range[i]
-        error_array[i, j] = idealmhd(grid_size=size, γ=5/3, A_A=amplitude, cfl=0.4, t_max=0.25)
+        error_array[i, j] = idealmhd(grid_size=size, γ=5/3, A_A=amplitude, cfl=0.4, t_max=0.0)
     end
 
     plt = Plots.plot(grid_size_range, error_array, legend=false, 
         markershape=:circle, yscale=:log10, title="Grid error")
     display(plt)
-    Plots.pdf(plt, "test_linearwave_convergence")
+    # Plots.pdf(plt, "test_linearwave_convergence")
 end
 
 function alfvenwave_amplitudescaling()
@@ -216,5 +219,5 @@ function alfvenwave_amplitudescaling()
     Plots.pdf(plt, "difference_amplitude_scaling")
 end
 
-alfvenwave_amplitudescaling()
-# alfvenwave_test()
+# alfvenwave_amplitudescaling()
+alfvenwave_test()

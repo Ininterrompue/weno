@@ -3,7 +3,7 @@ include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
 import Base.sign
-Plots.pyplot()
+Plots.pyplot(size=(1024, 512))
 # Plots.gr()
 
 abstract type BoundaryCondition end
@@ -784,7 +784,7 @@ function calculate_temperature(state, sys)
     return T
 end
 
-function calculate_divergence(state, sys)
+function calculate_divergenceB(state, sys)
     nx = sys.gridx.nx; ny = sys.gridy.nx
     dx = sys.gridx.dx; dy = sys.gridy.dx
     crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
@@ -799,6 +799,23 @@ function calculate_divergence(state, sys)
                              3/20 * Q_cons[i, j-2, 6] - 1/60 * Q_cons[i, j-3, 6])
     end
     return divB
+end
+
+function calculate_divergenceU(state, sys)
+    nx = sys.gridx.nx; ny = sys.gridy.nx
+    dx = sys.gridx.dx; dy = sys.gridy.dx
+    crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
+    Q_prim = state.Q_prim
+    divU = zeros(nx, ny)
+    for j in cry, i in crx
+        divU[i, j] = 1/dx * (1/60 * Q_prim[i+3, j, 1] - 3/20 * Q_prim[i+2, j, 1] + 
+                             3/4  * Q_prim[i+1, j, 1] - 3/4  * Q_prim[i-1, j, 1] +
+                             3/20 * Q_prim[i-2, j, 1] - 1/60 * Q_prim[i-3, j, 1]) +
+                     1/dy * (1/60 * Q_prim[i, j+3, 2] - 3/20 * Q_prim[i, j+2, 2] + 
+                             3/4  * Q_prim[i, j+1, 2] - 3/4  * Q_prim[i, j-1, 2] + 
+                             3/20 * Q_prim[i, j-2, 2] - 1/60 * Q_prim[i, j-3, 2])
+    end
+    return divU
 end
 
 function calculate_currentdensity(state, sys)
@@ -822,9 +839,9 @@ function plot_system(q, sys, titlename, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
     q_transposed = q[sys.gridx.cr_mesh, sys.gridy.cr_mesh] |> transpose
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
-                        fill=false, linecolor=:plasma, levels=30, aspect_ratio=1.0)
+                        fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0)
     display(plt)
-    # Plots.pdf(plt, filename)
+    Plots.png(plt, filename)
 end
 
 
