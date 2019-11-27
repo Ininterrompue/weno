@@ -3,7 +3,7 @@ include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
 import Base.sign
-Plots.pyplot(size=(1024, 512))
+Plots.pyplot(size=(1024, 1024))
 # Plots.gr()
 
 abstract type BoundaryCondition end

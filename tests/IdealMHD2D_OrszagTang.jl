@@ -25,13 +25,19 @@ end
 function plot_ρ(ρ_saved, sys, filename)
     crx = sys.gridx.x[sys.gridx.cr_mesh]; cry = sys.gridy.x[sys.gridy.cr_mesh]
 
+    ρ1 = ρ_saved[sys.gridx.cr_mesh, sys.gridy.cr_mesh, 1] |> transpose
     ρ2 = ρ_saved[sys.gridx.cr_mesh, sys.gridy.cr_mesh, 2] |> transpose
+    ρ3 = ρ_saved[sys.gridx.cr_mesh, sys.gridy.cr_mesh, 3] |> transpose
     ρ4 = ρ_saved[sys.gridx.cr_mesh, sys.gridy.cr_mesh, 4] |> transpose
+    plt1 = Plots.contour(crx, cry, ρ1, fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0, 
+                         title="t = 1", showaxis=false, grid=false)
     plt2 = Plots.contour(crx, cry, ρ2, fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0, 
                          title="t = 2", showaxis=false, grid=false)
+    plt3 = Plots.contour(crx, cry, ρ3, fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0, 
+                         title="t = 3", showaxis=false, grid=false)
     plt4 = Plots.contour(crx, cry, ρ4, fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0, 
                          title="t = 4", showaxis=false, grid=false)
-    plt = Plots.plot(plt2, plt4, layout=(1, 2), legend=false)
+    plt = Plots.plot(plt1, plt2, plt3, plt4, layout=(2, 2), legend=false)
     display(plt)
     Plots.png(plt, filename)
 end
@@ -182,4 +188,4 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
     # plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 end
 
-@time idealmhd(grid_size=128, t_max=4.0, method=:char)
+@time idealmhd(grid_size=192, t_max=4.0, method=:char)

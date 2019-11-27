@@ -8,10 +8,10 @@ We have written solvers for Burgers' equation, Euler equations, and ideal MHD eq
 
 ## Orszag-Tang vortex
 <p align="center">
-  <img src="./assets/orszagtang/rho_128_prettyplot.png">
+  <img src="./assets/orszagtang/rho_192_prettyplot.png">
 </p>
 
-Above are contour plots of the mass density at the snapshots t=2 and t=4 on a 128x128 grid.
+Above are contour plots of the mass density on a 192x192 grid.
 
 ## References
 1. X. D. Liu, S. Osher, and T. Chan, *J. Comput. Phys.* **115**:200-212 (1994).
