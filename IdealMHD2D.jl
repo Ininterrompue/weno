@@ -3,7 +3,8 @@ include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
 import Base.sign
-Plots.pyplot(size=(1024, 1024))
+# Plots.pyplot(size=(512, 512))
+Plots.pyplot()
 # Plots.gr()
 
 abstract type BoundaryCondition end
@@ -815,7 +816,7 @@ function calculate_divergenceU(state, sys)
                              3/4  * Q_prim[i, j+1, 2] - 3/4  * Q_prim[i, j-1, 2] + 
                              3/20 * Q_prim[i, j-2, 2] - 1/60 * Q_prim[i, j-3, 2])
     end
-    return divU
+    return 1 / (nx*ny) * (divU .|> abs |> sum)
 end
 
 function calculate_currentdensity(state, sys)

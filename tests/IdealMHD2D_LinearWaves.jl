@@ -23,6 +23,26 @@ function alfvenwave!(state, sys)
     end
 end
 
+"""
+MHD wave test 2: circularly polarized Alfven waves
+"""
+function alfven2waves!(state, sys)
+    γ = sys.γ; A_A = sys.A_A; Az = state.Az
+    Q_prim = state.Q_prim; Q_cons = state.Q_cons
+    nx = sys.gridx.nx; ny = sys.gridy.nx
+
+    for j in 1:ny, i in 1:nx
+        x = sys.gridx.x[i]
+        y = sys.gridy.x[j]
+        Q_cons[i, j, 1] = 1.0   # ρ
+        Q_prim[i, j, 4] = 1/γ   # P
+        Q_prim[i, j, 2] = A_A * ( cos(2π*x) - cos(π*x) )       # v
+        Q_cons[i, j, 5] = 1.0   # Bx
+        Q_cons[i, j, 6] = -A_A * ( cos(2π*x) - cos(π*x) )     # By
+        Az[i, j] = y + 1/2π * A_A * ( sin(2π*x) - sin(π*x) )   # Az
+    end 
+end
+
 function alfvenwave_error(sys, state, t)
     nx = sys.gridx.nx; ny = sys.gridy.nx
     cry = sys.gridy.cr_mesh; crx = sys.gridx.cr_mesh
@@ -109,6 +129,11 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     flxrec = preallocate_fluxreconstruction(sys)
     smooth = preallocate_smoothnessfunctions(sys)
 
+    t_range = 0.0:0.01:1.0
+    A_t = zeros(length(t_range))
+    divU = zeros(length(t_range)+1)
+
+    # alfven2waves!(state, sys)
     alfvenwave!(state, sys)
     bctype = SemiPeriodic()
 
@@ -119,7 +144,9 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
 
     t = 0.0; counter = 0; t0 = time()
     q = state.Q_local; f = flux.F_local
-    t_array = [1.0, 2.0, 3.0, 4.0]; t_counter = 1
+
+    # divU[1] = calculate_divergenceU(state, sys)
+    t_counter = 1
     while t < t_max
         update_physical_fluxes!(flux, state, sys)
         dt = CFL_condition(cfl, state, sys, wepar)
@@ -161,15 +188,18 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
         boundary_conditions_primitive!(state, sys, bctype)
 
         counter += 1
-        # if counter % 100 == 0
+        # if t > t_range[t_counter]
         #     @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
-        #         counter, t, dt, wepar.ev, time() - t0)
+        #         t_counter, t, dt, wepar.ev, time() - t0)
+        #     # A_t[t_counter] = alfvenwave_difference(sys, state, t)
+        #     # divU[t_counter] = calculate_divergenceU(state, sys)
+        #     t_counter += 1
         # end
     end
 
     @printf("%d grid size. %d iterations. t_max = %2.3f. Elapsed time = %3.3f.\n", 
         grid_size, counter, t, time() - t0)
-    plot_alfvenwaves(sys, state, t_max)
+    # plot_alfvenwaves(sys, state, t_max)
 
     # divU = calculate_divergenceU(state, sys)
     # plot_system(divU, sys, "divU", "")
@@ -182,8 +212,10 @@ function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0)
     # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "")
     # plot_system(state.Q_cons[:, :, 6], sys, "By", "")
 
-    # return alfvenwave_error(sys, state, t_max)
-    return alfvenwave_difference(sys, state, t_max)
+    return alfvenwave_error(sys, state, t_max)
+    # return alfvenwave_difference(sys, state, t_max)
+    # return A_t
+    # return divU
 end
 
 function alfvenwave_test()
@@ -194,13 +226,14 @@ function alfvenwave_test()
     for j in 1:length(A_A_exponents), i in 1:length(grid_size_range)
         amplitude = 10.0^(-A_A_exponents[j])
         size = grid_size_range[i]
-        error_array[i, j] = idealmhd(grid_size=size, γ=5/3, A_A=amplitude, cfl=0.4, t_max=0.0)
+        error_array[i, j] = idealmhd(grid_size=size, γ=5/3, A_A=amplitude, cfl=0.4, t_max=0.25)
     end
 
     plt = Plots.plot(grid_size_range, error_array, legend=false, 
-        markershape=:circle, yscale=:log10, title="Grid error")
+        markershape=:circle, yscale=:log10, title="Alfven wave convergence",
+        xlabel="Grid size", ylabel="Average grid error")
     display(plt)
-    # Plots.pdf(plt, "test_linearwave_convergence")
+    Plots.pdf(plt, "test_linearwave_convergence")
 end
 
 function alfvenwave_amplitudescaling()
@@ -219,5 +252,32 @@ function alfvenwave_amplitudescaling()
     Plots.pdf(plt, "difference_amplitude_scaling")
 end
 
+function alfvenwave_amplitudevst()
+    amplitude = 0.2
+    t_range = 0.0:0.01:1.0
+
+    A_t = idealmhd(grid_size=64, γ=5/3, A_A=amplitude, cfl=0.4, t_max=1.0)
+
+    plt = Plots.plot(t_range[2:end], A_t[2:end], legend=false, # yscale=:log2,
+        title="Amplitude of ByN - ByA", xlabel="t")
+    display(plt)
+    # Plots.pdf(plt, "difference_amplitude_vst_2e-1")
+end
+
+function alfvenwave_compression()
+    amplitude = 1e-2
+    t_range = 0.0:0.01:1.0
+
+    divU = idealmhd(grid_size=32, γ=5/3, A_A=amplitude, cfl=0.4, t_max=1.0)
+
+    plt = Plots.plot(t_range, divU, legend=false,
+        title="Amplitude of abs(divU)", xlabel="t")
+    display(plt)
+    # Plots.pdf(plt, "amplitude_divU_1e-2")
+end
+
 # alfvenwave_amplitudescaling()
 alfvenwave_test()
+# alfvenwave_amplitudevst()
+# alfvenwave_compression()
+# idealmhd(grid_size=64, γ=5/3, A_A=0.5, cfl=0.4, t_max=0.5)
