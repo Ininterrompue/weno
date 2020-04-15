@@ -39,7 +39,7 @@ function plot_ρ(ρ_saved, sys, filename)
                          title="t = 4", showaxis=false, grid=false)
     plt = Plots.plot(plt1, plt2, plt3, plt4, layout=(2, 2), legend=false)
     display(plt)
-    Plots.png(plt, filename)
+    # Plots.png(plt, filename)
 end
 
 function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
@@ -175,7 +175,7 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
         counter, t, time() - t0)
     
-    plot_ρ(ρ_saved, sys, "rho_$(grid_size)_prettyplot")
+    # plot_ρ(ρ_saved, sys, "rho_$(grid_size)_prettyplot")
     # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_max)_" * string(method))
     # plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_max)_" * string(method))
     # plot_system(state.Q_prim[:, :, 1], sys, "u", "u_$(grid_size)_t$(t_max)_" * string(method))
@@ -188,4 +188,4 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
     # plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 end
 
-@time idealmhd(grid_size=192, t_max=4.0, method=:char)
+@time idealmhd(grid_size=128, t_max=0.1, method=:char)

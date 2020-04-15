@@ -2,7 +2,6 @@ include("./System.jl")
 include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
-import Base.sign
 # Plots.pyplot(size=(512, 512))
 Plots.pyplot()
 # Plots.gr()
@@ -95,11 +94,7 @@ end
 
 mag2(x, y) = x^2 + y^2
 mag2(x, y, z) = x^2 + y^2 + z^2
-
-"""
-It is important that sign is defined so that sign(0) = 1 to avoid singular eigenvectors. 
-"""
-sign(x::Real) = x >= 0 ? oneunit(x) : x/abs(x)
+sgn(x::Real) = x >= 0 ? oneunit(x) : x/abs(x)
 
 """
 MHD current sheet
@@ -132,10 +127,10 @@ function primitive_to_conserved!(state, sys)
     nx = sys.gridx.nx; ny = sys.gridy.nx; γ = sys.γ
     Q_prim = state.Q_prim; Q_cons = state.Q_cons
     for j in 1:ny, i in 1:nx
-        Q_cons[i, j, 2]  = Q_cons[i, j, 1] * Q_prim[i, j, 1]   # ρu = ρ * u
-        Q_cons[i, j, 3]  = Q_cons[i, j, 1] * Q_prim[i, j, 2]   # ρv = ρ * v
-        Q_cons[i, j, 4]  = Q_cons[i, j, 1] * Q_prim[i, j, 3]   # ρw = ρ * w
-        Q_cons[i, j, 8] = Q_prim[i, j, 4] / (γ-1) +            # E  = P / (γ-1) + 1/2 * ρU^2 + 1/2 * B^2
+        Q_cons[i, j, 2] = Q_cons[i, j, 1] * Q_prim[i, j, 1]   # ρu = ρ * u
+        Q_cons[i, j, 3] = Q_cons[i, j, 1] * Q_prim[i, j, 2]   # ρv = ρ * v
+        Q_cons[i, j, 4] = Q_cons[i, j, 1] * Q_prim[i, j, 3]   # ρw = ρ * w
+        Q_cons[i, j, 8] = Q_prim[i, j, 4] / (γ-1) +           # E  = P / (γ-1) + 1/2 * ρU^2 + 1/2 * B^2
             1/2 * Q_cons[i, j, 1] * (mag2(Q_prim[i, j, 1], Q_prim[i, j, 2], Q_prim[i, j, 3])) +
             1/2 * mag2(Q_cons[i, j, 5], Q_cons[i, j, 6], Q_cons[i, j, 7])
     end
@@ -282,29 +277,29 @@ function update_xeigenvectors!(i, j, state, flxrec, sys)
     γ1 = (γ-1)/2
     γ2 = (γ-2)/(γ-1)
     τ  = (γ-1)/a^2
-    Γf = αf * cf * u - αs * cs * sign(Bx) * (βy * v + βz * w)
-    Γa = sign(Bx) * (βz * v - βy * w)
-    Γs = αs * cs * u + αf * cf * sign(Bx) * (βy * v + βz * w)
+    Γf = αf * cf * u - αs * cs * sgn(Bx) * (βy * v + βz * w)
+    Γa = sgn(Bx) * (βz * v - βy * w)
+    Γs = αs * cs * u + αf * cf * sgn(Bx) * (βy * v + βz * w)
     oneover2a2 = 1/2a^2
     
     Rx[1, 1] = αf
     Rx[2, 1] = αf * (u - cf)
-    Rx[3, 1] = αf * v + cs * αs * βy * sign(Bx)
-    Rx[4, 1] = αf * w + cs * αs * βz * sign(Bx)
+    Rx[3, 1] = αf * v + cs * αs * βy * sgn(Bx)
+    Rx[4, 1] = αf * w + cs * αs * βz * sgn(Bx)
     Rx[6, 1] = a * αs * βy / sqrt(ρ)
     Rx[7, 1] = a * αs * βz / sqrt(ρ)
     Rx[8, 1] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) - Γf
 
-    Rx[3, 2] = -βz * sign(Bx)
-    Rx[4, 2] = +βy * sign(Bx)
+    Rx[3, 2] = -βz * sgn(Bx)
+    Rx[4, 2] = +βy * sgn(Bx)
     Rx[6, 2] = -βz / sqrt(ρ)
     Rx[7, 2] = +βy / sqrt(ρ)
     Rx[8, 2] = -Γa
 
     Rx[1, 3] = αs
     Rx[2, 3] = αs * (u - cs)
-    Rx[3, 3] = αs * v - cf * αf * βy * sign(Bx)
-    Rx[4, 3] = αs * w - cf * αf * βz * sign(Bx)
+    Rx[3, 3] = αs * v - cf * αf * βy * sgn(Bx)
+    Rx[4, 3] = αs * w - cf * αf * βz * sgn(Bx)
     Rx[6, 3] = -a * αf * βy / sqrt(ρ)
     Rx[7, 3] = -a * αf * βz / sqrt(ρ)
     Rx[8, 3] = αs * (1/2 * mag2(u, v, w) + cs^2 - γ2 * a^2) - Γs
@@ -320,45 +315,45 @@ function update_xeigenvectors!(i, j, state, flxrec, sys)
 
     Rx[1, 6] = αs
     Rx[2, 6] = αs * (u + cs)
-    Rx[3, 6] = αs * v + cf * αf * βy * sign(Bx)
-    Rx[4, 6] = αs * w + cf * αf * βz * sign(Bx)
+    Rx[3, 6] = αs * v + cf * αf * βy * sgn(Bx)
+    Rx[4, 6] = αs * w + cf * αf * βz * sgn(Bx)
     Rx[6, 6] = -a * αf * βy / sqrt(ρ)
     Rx[7, 6] = -a * αf * βz / sqrt(ρ)
     Rx[8, 6] = αs * (1/2 * mag2(u, v, w) + cs^2 - γ2 * a^2) + Γs
 
-    Rx[3, 7] = -βz * sign(Bx)
-    Rx[4, 7] = +βy * sign(Bx)
+    Rx[3, 7] = -βz * sgn(Bx)
+    Rx[4, 7] = +βy * sgn(Bx)
     Rx[6, 7] = +βz / sqrt(ρ)
     Rx[7, 7] = -βy / sqrt(ρ)
     Rx[8, 7] = -Γa
 
     Rx[1, 8] = αf
     Rx[2, 8] = αf * (u + cf)
-    Rx[3, 8] = αf * v - cs * αs * βy * sign(Bx)
-    Rx[4, 8] = αf * w - cs * αs * βz * sign(Bx)
+    Rx[3, 8] = αf * v - cs * αs * βy * sgn(Bx)
+    Rx[4, 8] = αf * w - cs * αs * βz * sgn(Bx)
     Rx[6, 8] = a * αs * βy / sqrt(ρ)
     Rx[7, 8] = a * αs * βz / sqrt(ρ)
     Rx[8, 8] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) + Γf
 
     Lx[1, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) + Γf)
     Lx[1, 2] = oneover2a2 * ((1-γ) * αf * u - αf * cf)
-    Lx[1, 3] = oneover2a2 * ((1-γ) * αf * v + cs * αs * βy * sign(Bx))
-    Lx[1, 4] = oneover2a2 * ((1-γ) * αf * w + cs * αs * βz * sign(Bx))
+    Lx[1, 3] = oneover2a2 * ((1-γ) * αf * v + cs * αs * βy * sgn(Bx))
+    Lx[1, 4] = oneover2a2 * ((1-γ) * αf * w + cs * αs * βz * sgn(Bx))
     Lx[1, 5] = oneover2a2 * ((1-γ) * αf * Bx)
     Lx[1, 6] = oneover2a2 * ((1-γ) * αf * By + sqrt(ρ) * a * αs * βy) # +
     Lx[1, 7] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
     Lx[1, 8] = oneover2a2 * ((γ-1) * αf)
 
     Lx[2, 1] = 1/2 * Γa
-    Lx[2, 3] = 1/2 * -βz * sign(Bx)
-    Lx[2, 4] = 1/2 * +βy * sign(Bx)
+    Lx[2, 3] = 1/2 * -βz * sgn(Bx)
+    Lx[2, 4] = 1/2 * +βy * sgn(Bx)
     Lx[2, 6] = 1/2 * -sqrt(ρ) * βz
     Lx[2, 7] = 1/2 * +sqrt(ρ) * βy
 
     Lx[3, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) + Γs)
     Lx[3, 2] = oneover2a2 * ((1-γ) * αs * u - αs * cs)
-    Lx[3, 3] = oneover2a2 * ((1-γ) * αs * v - cf * αf * βy * sign(Bx))
-    Lx[3, 4] = oneover2a2 * ((1-γ) * αs * w - cf * αf * βz * sign(Bx))
+    Lx[3, 3] = oneover2a2 * ((1-γ) * αs * v - cf * αf * βy * sgn(Bx))
+    Lx[3, 4] = oneover2a2 * ((1-γ) * αs * w - cf * αf * βz * sgn(Bx))
     Lx[3, 5] = oneover2a2 * ((1-γ) * αs * Bx)
     Lx[3, 6] = oneover2a2 * ((1-γ) * αs * By - sqrt(ρ) * a * αf * βy)
     Lx[3, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
@@ -377,23 +372,23 @@ function update_xeigenvectors!(i, j, state, flxrec, sys)
 
     Lx[6, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) - Γs)
     Lx[6, 2] = oneover2a2 * ((1-γ) * αs * u + αs * cs)
-    Lx[6, 3] = oneover2a2 * ((1-γ) * αs * v + cf * αf * βy * sign(Bx))
-    Lx[6, 4] = oneover2a2 * ((1-γ) * αs * w + cf * αf * βz * sign(Bx))
+    Lx[6, 3] = oneover2a2 * ((1-γ) * αs * v + cf * αf * βy * sgn(Bx))
+    Lx[6, 4] = oneover2a2 * ((1-γ) * αs * w + cf * αf * βz * sgn(Bx))
     Lx[6, 5] = oneover2a2 * ((1-γ) * αs * Bx)
     Lx[6, 6] = oneover2a2 * ((1-γ) * αs * By - sqrt(ρ) * a * αf * βy)
     Lx[6, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
     Lx[6, 8] = oneover2a2 * ((γ-1) * αs)
 
     Lx[7, 1] = 1/2 * Γa
-    Lx[7, 3] = 1/2 * -βz * sign(Bx)
-    Lx[7, 4] = 1/2 * +βy * sign(Bx)
+    Lx[7, 3] = 1/2 * -βz * sgn(Bx)
+    Lx[7, 4] = 1/2 * +βy * sgn(Bx)
     Lx[7, 6] = 1/2 * +sqrt(ρ) * βz
     Lx[7, 7] = 1/2 * -sqrt(ρ) * βy
 
     Lx[8, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) - Γf)
     Lx[8, 2] = oneover2a2 * ((1-γ) * αf * u + αf * cf)
-    Lx[8, 3] = oneover2a2 * ((1-γ) * αf * v - cs * αs * βy * sign(Bx))
-    Lx[8, 4] = oneover2a2 * ((1-γ) * αf * w - cs * αs * βz * sign(Bx))
+    Lx[8, 3] = oneover2a2 * ((1-γ) * αf * v - cs * αs * βy * sgn(Bx))
+    Lx[8, 4] = oneover2a2 * ((1-γ) * αf * w - cs * αs * βz * sgn(Bx))
     Lx[8, 5] = oneover2a2 * ((1-γ) * αf * Bx)
     Lx[8, 6] = oneover2a2 * ((1-γ) * αf * By + sqrt(ρ) * a * αs * βy) # +
     Lx[8, 7] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
@@ -431,29 +426,29 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
     γ1 = (γ-1)/2
     γ2 = (γ-2)/(γ-1)
     τ  = (γ-1)/a^2
-    Γf = αf * cf * v - αs * cs * sign(By) * (βx * u + βz * w)
-    Γa = sign(By) * (βz * u - βx * w)
-    Γs = αs * cs * v + αf * cf * sign(By) * (βx * u + βz * w)
+    Γf = αf * cf * v - αs * cs * sgn(By) * (βx * u + βz * w)
+    Γa = sgn(By) * (βz * u - βx * w)
+    Γs = αs * cs * v + αf * cf * sgn(By) * (βx * u + βz * w)
     oneover2a2 = 1/2a^2
     
     Ry[1, 1] = αf
     Ry[2, 1] = αf * (v - cf)
-    Ry[3, 1] = αf * u + cs * αs * βx * sign(By)
-    Ry[4, 1] = αf * w + cs * αs * βz * sign(By)
+    Ry[3, 1] = αf * u + cs * αs * βx * sgn(By)
+    Ry[4, 1] = αf * w + cs * αs * βz * sgn(By)
     Ry[6, 1] = a * αs * βx / sqrt(ρ)
     Ry[7, 1] = a * αs * βz / sqrt(ρ)
     Ry[8, 1] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) - Γf
 
-    Ry[3, 3] = -βz * sign(By)
-    Ry[4, 3] = +βx * sign(By)
+    Ry[3, 3] = -βz * sgn(By)
+    Ry[4, 3] = +βx * sgn(By)
     Ry[6, 3] = -βz / sqrt(ρ)
     Ry[7, 3] = +βx / sqrt(ρ)
     Ry[8, 3] = -Γa
 
     Ry[1, 2] = αs
     Ry[2, 2] = αs * (v - cs)
-    Ry[3, 2] = αs * u - cf * αf * βx * sign(By)
-    Ry[4, 2] = αs * w - cf * αf * βz * sign(By)
+    Ry[3, 2] = αs * u - cf * αf * βx * sgn(By)
+    Ry[4, 2] = αs * w - cf * αf * βz * sgn(By)
     Ry[6, 2] = -a * αf * βx / sqrt(ρ)
     Ry[7, 2] = -a * αf * βz / sqrt(ρ)
     Ry[8, 2] = αs * (1/2 * mag2(u, v, w) + cs^2 - γ2 * a^2) - Γs
@@ -469,45 +464,45 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
 
     Ry[1, 5] = αs
     Ry[2, 5] = αs * (v + cs)
-    Ry[3, 5] = αs * u + cf * αf * βx * sign(By)
-    Ry[4, 5] = αs * w + cf * αf * βz * sign(By)
+    Ry[3, 5] = αs * u + cf * αf * βx * sgn(By)
+    Ry[4, 5] = αs * w + cf * αf * βz * sgn(By)
     Ry[6, 5] = -a * αf * βx / sqrt(ρ)
     Ry[7, 5] = -a * αf * βz / sqrt(ρ)
     Ry[8, 5] = αs * (1/2 * mag2(u, v, w) + cs^2 - γ2 * a^2) + Γs
 
-    Ry[3, 7] = -βz * sign(By)
-    Ry[4, 7] = +βx * sign(By)
+    Ry[3, 7] = -βz * sgn(By)
+    Ry[4, 7] = +βx * sgn(By)
     Ry[6, 7] = +βz / sqrt(ρ)
     Ry[7, 7] = -βx / sqrt(ρ)
     Ry[8, 7] = -Γa
 
     Ry[1, 8] = αf
     Ry[2, 8] = αf * (v + cf)
-    Ry[3, 8] = αf * u - cs * αs * βx * sign(By)
-    Ry[4, 8] = αf * w - cs * αs * βz * sign(By)
+    Ry[3, 8] = αf * u - cs * αs * βx * sgn(By)
+    Ry[4, 8] = αf * w - cs * αs * βz * sgn(By)
     Ry[6, 8] = a * αs * βx / sqrt(ρ)
     Ry[7, 8] = a * αs * βz / sqrt(ρ)
     Ry[8, 8] = αf * (1/2 * mag2(u, v, w) + cf^2 - γ2 * a^2) + Γf
 
     Ly[1, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) + Γf)
     Ly[1, 2] = oneover2a2 * ((1-γ) * αf * v - αf * cf)
-    Ly[1, 3] = oneover2a2 * ((1-γ) * αf * u + cs * αs * βx * sign(By))
-    Ly[1, 4] = oneover2a2 * ((1-γ) * αf * w + cs * αs * βz * sign(By))
+    Ly[1, 3] = oneover2a2 * ((1-γ) * αf * u + cs * αs * βx * sgn(By))
+    Ly[1, 4] = oneover2a2 * ((1-γ) * αf * w + cs * αs * βz * sgn(By))
     Ly[1, 5] = oneover2a2 * ((1-γ) * αf * By)
     Ly[1, 6] = oneover2a2 * ((1-γ) * αf * Bx + sqrt(ρ) * a * αs * βx) # +
     Ly[1, 7] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
     Ly[1, 8] = oneover2a2 * ((γ-1) * αf)
 
     Ly[3, 1] = 1/2 * Γa
-    Ly[3, 3] = 1/2 * -βz * sign(By)
-    Ly[3, 4] = 1/2 * +βx * sign(By)
+    Ly[3, 3] = 1/2 * -βz * sgn(By)
+    Ly[3, 4] = 1/2 * +βx * sgn(By)
     Ly[3, 6] = 1/2 * -sqrt(ρ) * βz
     Ly[3, 7] = 1/2 * +sqrt(ρ) * βx
 
     Ly[2, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) + Γs)
     Ly[2, 2] = oneover2a2 * ((1-γ) * αs * v - αs * cs)
-    Ly[2, 3] = oneover2a2 * ((1-γ) * αs * u - cf * αf * βx * sign(By))
-    Ly[2, 4] = oneover2a2 * ((1-γ) * αs * w - cf * αf * βz * sign(By))
+    Ly[2, 3] = oneover2a2 * ((1-γ) * αs * u - cf * αf * βx * sgn(By))
+    Ly[2, 4] = oneover2a2 * ((1-γ) * αs * w - cf * αf * βz * sgn(By))
     Ly[2, 5] = oneover2a2 * ((1-γ) * αs * By)
     Ly[2, 6] = oneover2a2 * ((1-γ) * αs * Bx - sqrt(ρ) * a * αf * βx)
     Ly[2, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
@@ -526,23 +521,23 @@ function update_yeigenvectors!(i, j, state, flxrec, sys)
 
     Ly[5, 1] = oneover2a2 * (γ1 * αs * mag2(u, v, w) - Γs)
     Ly[5, 2] = oneover2a2 * ((1-γ) * αs * v + αs * cs)
-    Ly[5, 3] = oneover2a2 * ((1-γ) * αs * u + cf * αf * βx * sign(By))
-    Ly[5, 4] = oneover2a2 * ((1-γ) * αs * w + cf * αf * βz * sign(By))
+    Ly[5, 3] = oneover2a2 * ((1-γ) * αs * u + cf * αf * βx * sgn(By))
+    Ly[5, 4] = oneover2a2 * ((1-γ) * αs * w + cf * αf * βz * sgn(By))
     Ly[5, 5] = oneover2a2 * ((1-γ) * αs * By)
     Ly[5, 6] = oneover2a2 * ((1-γ) * αs * Bx - sqrt(ρ) * a * αf * βx)
     Ly[5, 7] = oneover2a2 * ((1-γ) * αs * Bz - sqrt(ρ) * a * αf * βz)
     Ly[5, 8] = oneover2a2 * ((γ-1) * αs)
 
     Ly[7, 1] = 1/2 * Γa
-    Ly[7, 3] = 1/2 * -βz * sign(By)
-    Ly[7, 4] = 1/2 * +βx * sign(By)
+    Ly[7, 3] = 1/2 * -βz * sgn(By)
+    Ly[7, 4] = 1/2 * +βx * sgn(By)
     Ly[7, 6] = 1/2 * +sqrt(ρ) * βz
     Ly[7, 7] = 1/2 * -sqrt(ρ) * βx
 
     Ly[8, 1] = oneover2a2 * (γ1 * αf * mag2(u, v, w) - Γf)
     Ly[8, 2] = oneover2a2 * ((1-γ) * αf * v + αf * cf)
-    Ly[8, 3] = oneover2a2 * ((1-γ) * αf * u - cs * αs * βx * sign(By))
-    Ly[8, 4] = oneover2a2 * ((1-γ) * αf * w - cs * αs * βz * sign(By))
+    Ly[8, 3] = oneover2a2 * ((1-γ) * αf * u - cs * αs * βx * sgn(By))
+    Ly[8, 4] = oneover2a2 * ((1-γ) * αf * w - cs * αs * βz * sgn(By))
     Ly[8, 5] = oneover2a2 * ((1-γ) * αf * By)
     Ly[8, 6] = oneover2a2 * ((1-γ) * αf * Bx + sqrt(ρ) * a * αs * βx) # +
     Ly[8, 7] = oneover2a2 * ((1-γ) * αf * Bz - sqrt(ρ) * a * αs * βz)
@@ -842,7 +837,7 @@ function plot_system(q, sys, titlename, filename)
     plt = Plots.contour(crx, cry, q_transposed, title=titlename, 
                         fill=true, linecolor=:plasma, levels=15, aspect_ratio=1.0)
     display(plt)
-    Plots.png(plt, filename)
+    # Plots.png(plt, filename)
 end
 
 
