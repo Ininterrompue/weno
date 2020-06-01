@@ -2,6 +2,7 @@ include("./System.jl")
 include("./Weno.jl")
 using Printf
 import Plots, BenchmarkTools
+using LoopVectorization
 # Plots.pyplot(size=(512, 512))
 Plots.pyplot()
 # Plots.gr()
@@ -641,11 +642,13 @@ function project_to_realspace!(i, j, flux, flxrec, sys, dim)
 end
 
 function time_evolution!(state, flux, sys, dt, rkpar)
-    for n in 1:sys.ncons, j in sys.gridy.cr_mesh, i in sys.gridx.cr_mesh
+    crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
+    ncons = sys.ncons; gridx = sys.gridx; gridy = sys.gridy
+    @avx for n in 1:ncons, j in cry, i in crx
         rkpar.op[i, j, n] = Weno.weno_scheme(
             flux.Fx_hat[i, j, n], flux.Fx_hat[i-1, j, n],
             flux.Fy_hat[i, j, n], flux.Fy_hat[i, j-1, n], 
-            sys.gridx, sys.gridy, rkpar)
+            gridx, gridy)
     end
     Weno.runge_kutta!(state.Q_cons, dt, rkpar)
 end
@@ -686,7 +689,7 @@ function time_evolution_Az!(state, flux, sys, dt, rApar)
     Az_x = flux.Az_x; Az_y = flux.Az_y
     αx = maximum(@view(Q_prim[:, :, 1]))
     αy = maximum(@view(Q_prim[:, :, 2]))
-    for j in cry, i in crx
+    @avx for j in cry, i in crx
         rApar.op[i, j] = -Q_prim[i, j, 1]/2 * (Az_x[i, j, 1] + Az_x[i, j, 2]) + 
                          -Q_prim[i, j, 2]/2 * (Az_y[i, j, 1] + Az_y[i, j, 2]) +
                          αx/2 * (Az_x[i, j, 1] - Az_x[i, j, 2]) + 
@@ -700,7 +703,7 @@ function correct_magneticfield!(state, sys)
     crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
     dx = sys.gridx.dx; dy = sys.gridy.dx
 
-    for j in cry, i in crx
+    @avx for j in cry, i in crx
         Q_cons[i, j, 5] = 1/dy * (+1/60 * Az[i, j+3] - 3/20 * Az[i, j+2] + 3/4  * Az[i, j+1] - 
                                   +3/4  * Az[i, j-1] + 3/20 * Az[i, j-2] - 1/60 * Az[i, j-3])
         Q_cons[i, j, 6] = 1/dx * (-1/60 * Az[i+3, j] + 3/20 * Az[i+2, j] - 3/4  * Az[i+1, j] +
@@ -774,7 +777,7 @@ end
 function calculate_temperature(state, sys)
     nx = sys.gridx.nx; ny = sys.gridy.nx
     T = zeros(nx, ny)
-    for j in 1:ny, i in 1:nx
+    @avx for j in 1:ny, i in 1:nx
         T[i, j] = state.Q_prim[i, j, 4] / 2state.Q_cons[i, j, 1]
     end
     return T
@@ -786,7 +789,7 @@ function calculate_divergenceB(state, sys)
     crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
     Q_cons = state.Q_cons
     divB = zeros(nx, ny)
-    for j in cry, i in crx
+    @avx for j in cry, i in crx
         divB[i, j] = 1/dx * (1/60 * Q_cons[i+3, j, 5] - 3/20 * Q_cons[i+2, j, 5] + 
                              3/4  * Q_cons[i+1, j, 5] - 3/4  * Q_cons[i-1, j, 5] +
                              3/20 * Q_cons[i-2, j, 5] - 1/60 * Q_cons[i-3, j, 5]) +
@@ -803,7 +806,7 @@ function calculate_divergenceU(state, sys)
     crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
     Q_prim = state.Q_prim
     divU = zeros(nx, ny)
-    for j in cry, i in crx
+    @avx for j in cry, i in crx
         divU[i, j] = 1/dx * (1/60 * Q_prim[i+3, j, 1] - 3/20 * Q_prim[i+2, j, 1] + 
                              3/4  * Q_prim[i+1, j, 1] - 3/4  * Q_prim[i-1, j, 1] +
                              3/20 * Q_prim[i-2, j, 1] - 1/60 * Q_prim[i-3, j, 1]) +
@@ -811,6 +814,7 @@ function calculate_divergenceU(state, sys)
                              3/4  * Q_prim[i, j+1, 2] - 3/4  * Q_prim[i, j-1, 2] + 
                              3/20 * Q_prim[i, j-2, 2] - 1/60 * Q_prim[i, j-3, 2])
     end
+    # return divU
     return 1 / (nx*ny) * (divU .|> abs |> sum)
 end
 
@@ -820,7 +824,7 @@ function calculate_currentdensity(state, sys)
     crx = sys.gridx.cr_mesh; cry = sys.gridy.cr_mesh
     Q_cons = state.Q_cons
     Jz = zeros(nx, ny)
-    for j in cry, i in crx
+    @avx for j in cry, i in crx
         Jz[i, j] = 1/dx * (1/60 * Q_cons[i+3, j, 6] - 3/20 * Q_cons[i+2, j, 6] + 
                            3/4  * Q_cons[i+1, j, 6] - 3/4  * Q_cons[i-1, j, 6] +
                            3/20 * Q_cons[i-2, j, 6] - 1/60 * Q_cons[i-3, j, 6]) -
@@ -839,152 +843,3 @@ function plot_system(q, sys, titlename, filename)
     display(plt)
     # Plots.png(plt, filename)
 end
-
-
-# function idealmhd(; grid_size=64, γ=5/3, A_A=1e-2, cfl=0.4, t_max=0.0, method=:char)
-#     gridx = grid(size=grid_size, min=-1, max=1)
-#     gridy = grid(size=grid_size, min=-1, max=1)
-#     sys = SystemParameters2D(gridx, gridy, 4, 8, γ, A_A)
-#     rApar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy)
-#     rkpar = Weno.preallocate_rungekutta_parameters_2D(gridx, gridy, sys)
-#     wepar = Weno.preallocate_weno_parameters()
-#     state = preallocate_statevectors(sys)
-#     flux = preallocate_fluxes(sys)
-#     flxrec = preallocate_fluxreconstruction(sys)
-#     smooth = preallocate_smoothnessfunctions(sys)
-
-#     currentsheet!(state, sys)
-#     bctype = Periodic()
-
-#     primitive_to_conserved!(state, sys)
-#     boundary_conditions_primitive!(state, sys, bctype)
-#     boundary_conditions_conserved!(state, sys, bctype)
-#     boundary_conditions_Az!(state, sys, bctype)
-
-#     t = 0.0; counter = 0; t0 = time()
-#     q = state.Q_local; f = flux.F_local
-#     t_array = [1.0, 2.0, 3.0, 4.0]; t_counter = 1
-#     while t < t_max
-#         update_physical_fluxes!(flux, state, sys)
-#         dt = CFL_condition(cfl, state, sys, wepar)
-#         t += dt
-        
-#         if method == :comp
-#             for j in gridy.cr_cell, i in gridx.cr_cell
-#                 update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-#                 Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, false)
-#             end
-#             for j in gridy.cr_cell, i in gridx.cr_cell
-#                 update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-#                 Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, false)
-#             end
-#         elseif method == :char
-#             for j in gridy.cr_cell, i in gridx.cr_cell
-#                 update_xeigenvectors!(i, j, state, flxrec, sys)
-#                 project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-#                 update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-#                 Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-#                 project_to_realspace!(i, j, flux, flxrec, sys, :X)
-#             end
-#             for j in gridy.cr_cell, i in gridx.cr_cell
-#                 update_yeigenvectors!(i, j, state, flxrec, sys)
-#                 project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-#                 update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-#                 Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-#                 project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-#             end
-#         elseif method == :ada
-#             update_smoothnessfunctions!(smooth, state, sys, wepar.ev)
-#             for j in gridy.cr_cell, i in gridx.cr_cell
-#                 update_local_smoothnessfunctions!(i, j, smooth, wepar, :X)
-#                 Weno.nonlinear_weights_plus!(wepar)
-#                 Weno.nonlinear_weights_minus!(wepar)
-#                 Weno.update_switches!(wepar)
-#                 if wepar.θp > 0.5 && wepar.θm > 0.5
-#                     update_local!(i, j, state.Q_cons, flux.Fx, q, f, sys, :X)
-#                     Weno.update_numerical_fluxes!(i, j, flux.Fx_hat, q, f, sys, wepar, true)
-#                 else
-#                     update_xeigenvectors!(i, j, state, flxrec, sys)
-#                     project_to_localspace!(i, j, state, flux, flxrec, sys, :X)
-#                     update_local!(i, j, state.Q_proj, flux.Gx, q, f, sys, :X)
-#                     Weno.update_numerical_fluxes!(i, j, flux.Gx_hat, q, f, sys, wepar, false)
-#                     project_to_realspace!(i, j, flux, flxrec, sys, :X)
-#                 end
-#             end
-#             for j in gridy.cr_cell, i in gridx.cr_cell
-#                 update_local_smoothnessfunctions!(i, j, smooth, wepar, :Y)
-#                 Weno.nonlinear_weights_plus!(wepar)
-#                 Weno.nonlinear_weights_minus!(wepar)
-#                 Weno.update_switches!(wepar)
-#                 if wepar.θp > 0.5 && wepar.θm > 0.5
-#                     update_local!(i, j, state.Q_cons, flux.Fy, q, f, sys, :Y)
-#                     Weno.update_numerical_fluxes!(i, j, flux.Fy_hat, q, f, sys, wepar, true)
-#                 else
-#                     update_yeigenvectors!(i, j, state, flxrec, sys)
-#                     project_to_localspace!(i, j, state, flux, flxrec, sys, :Y)
-#                     update_local!(i, j, state.Q_proj, flux.Gy, q, f, sys, :Y)
-#                     Weno.update_numerical_fluxes!(i, j, flux.Gy_hat, q, f, sys, wepar, false)
-#                     project_to_realspace!(i, j, flux, flxrec, sys, :Y)
-#                 end
-#             end
-#         end
-
-#         for j in gridy.cr_mesh, i in gridx.cr_mesh
-#             update_local_Az_derivatives!(i, j, state, sys, wepar, :X)
-#             update_numerical_Az_derivatives!(i, j, state, flux, wepar, :X)
-#         end
-#         for j in gridy.cr_mesh, i in gridx.cr_mesh
-#             update_local_Az_derivatives!(i, j, state, sys, wepar, :Y)
-#             update_numerical_Az_derivatives!(i, j, state, flux, wepar, :Y)
-#         end
-
-#         time_evolution_Az!(state, flux, sys, dt, rApar)
-#         boundary_conditions_Az!(state, sys, bctype)
-
-#         time_evolution!(state, flux, sys, dt, rkpar)
-#         correct_magneticfield!(state, sys)
-#         boundary_conditions_conserved!(state, sys, bctype)
-
-#         conserved_to_primitive!(state, sys)
-#         boundary_conditions_primitive!(state, sys, bctype)
-
-#         counter += 1
-#         if counter % 100 == 0
-#             @printf("Iteration %d: t = %2.3f, dt = %2.3e, v_max = %6.5f, Elapsed time = %3.3f\n", 
-#                 counter, t, dt, wepar.ev, time() - t0)
-#         end
-#         if t > t_array[t_counter]
-#             plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
-#             plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
-#             plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
-#             plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
-#             plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
-        
-#             T = calculate_temperature(state, sys)
-#             plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
-
-#             divB = calculate_divergence(state, sys)
-#             plot_system(divB, sys, "divB", "divB_$(grid_size)_t$(t_counter)_" * string(method))
-
-#             t_counter += 1
-#         end
-#     end
-#     @printf("%d iterations. t_max = %2.3f. Elapsed time = %3.3f\n", 
-#         counter, t, time() - t0)
-    
-#     # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
-#     # plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
-#     # plot_system(state.Q_prim[:, :, 1], sys, "u", "u_$(grid_size)_t$(t_counter)_" * string(method))
-#     # plot_system(state.Q_prim[:, :, 2], sys, "v", "v_$(grid_size)_t$(t_counter)_" * string(method))
-#     # plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
-#     # plot_system(state.Q_cons[:, :, 5], sys, "Bx", "Bx_$(grid_size)_t$(t_counter)_" * string(method))
-#     # plot_system(state.Q_cons[:, :, 6], sys, "By", "By_$(grid_size)_t$(t_counter)_" * string(method))
-
-#     # T = calculate_temperature(state, sys)
-#     # plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
-
-#     # Jz = calculate_currentdensity(state, sys)
-#     # plot_system(Jz, sys, "Jz", "Jz_$(grid_size)_t$(t_counter)_" * string(method))
-# end
-
-# @time idealmhd(grid_size=64, t_max=0.5)

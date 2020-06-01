@@ -1,12 +1,9 @@
 module Weno
 
-export diagonalize_jacobian!, update_numerical_fluxes!, fhatp, fhatm
+export update_numerical_fluxes!, weno_scheme, runge_kutta!, fhatp, fhatm
 export nonlinear_weights_plus!, nonlinear_weights_minus!, update_switches!
 export preallocate_rungekutta_parameters_1D, preallocate_rungekutta_parameters_2D
 export preallocate_weno_parameters
-export weno_scheme!, runge_kutta!
-
-using LinearAlgebra
 
 
 mutable struct RungeKuttaParameters{T}
@@ -26,12 +23,12 @@ mutable struct WenoParameters{T}
     fhat0m::T
     fhat1m::T
     fhat2m::T
-    w0p::T
-    w1p::T
-    w2p::T
-    w0m::T
-    w1m::T
-    w2m::T
+    ω0p::T
+    ω1p::T
+    ω2p::T
+    ω0m::T
+    ω1m::T
+    ω2m::T
     β0p::T
     β1p::T
     β2p::T
@@ -91,13 +88,6 @@ function preallocate_weno_parameters()
         0.0, 0.0, 0.0, 0.0, 1e-6)        # τ, θ, ϵ
 end
 
-# Need to figure out a way to bypass the inv().
-# LAPACK.geev!('V', 'V', J) gives wrong results...
-function diagonalize_jacobian!(flxrec)
-    flxrec.eval, flxrec.R = eigen(flxrec.J)
-    flxrec.L = inv(flxrec.R)
-end
-
 function update_switches!(w)
     w.θp = 1 / (1 + (w.α0p + w.α1p + w.α2p - 1)^2)
     w.θm = 1 / (1 + (w.α0m + w.α1m + w.α2m - 1)^2)
@@ -110,27 +100,13 @@ function runge_kutta!(u, dt, rkpar)
     @. u = rkpar.u3
 end
 
-function weno_scheme!(f_hat, gridx, rkpar)
-    for i in gridx.cr_mesh
-        rkpar.op[i] = -1/gridx.dx * (f_hat[i] - f_hat[i-1])
-    end
-end
-
-function weno_scheme(f1, f0, gridx, rkpar)
+function weno_scheme(f1, f0, gridx)
     return -1/gridx.dx * (f1 - f0)
 end
 
-function weno_scheme(fx1, fx0, fy1, fy0, gridx, gridy, rkpar)
+function weno_scheme(fx1, fx0, fy1, fy0, gridx, gridy)
     return -1/gridx.dx * (fx1 - fx0) +
            -1/gridy.dx * (fy1 - fy0)
-end
-
-function weno_scheme!(fx_hat, fy_hat, gridx, gridy, rkpar)
-    for j in gridy.cr_mesh, i in gridx.cr_mesh
-        rkpar.op[i, j] = 
-            -1/gridx.dx * (fx_hat[i, j] - fx_hat[i-1, j]) +
-            -1/gridy.dx * (fy_hat[i, j] - fy_hat[i, j-1])
-    end
 end
 
 # Lax-Friderichs flux splitting
@@ -175,7 +151,7 @@ function fhatp(w, ada)
     w.fhat2p =  1/3 * w.fp[3] + 5/6 * w.fp[4] -  1/6 * w.fp[5]
 
     if ada == false nonlinear_weights_plus!(w) end
-    return w.w0p * w.fhat0p + w.w1p * w.fhat1p + w.w2p * w.fhat2p
+    return w.ω0p * w.fhat0p + w.ω1p * w.fhat1p + w.ω2p * w.fhat2p
 end
 
 function fhatm(w, ada)
@@ -184,7 +160,7 @@ function fhatm(w, ada)
     w.fhat2m =  1/3 * w.fm[6] - 7/6 * w.fm[5] + 11/6 * w.fm[4]
 
     if ada == false nonlinear_weights_minus!(w) end
-    return w.w0m * w.fhat0m + w.w1m * w.fhat1m + w.w2m * w.fhat2m
+    return w.ω0m * w.fhat0m + w.ω1m * w.fhat1m + w.ω2m * w.fhat2m
 end
 
 function nonlinear_weights_plus!(w)

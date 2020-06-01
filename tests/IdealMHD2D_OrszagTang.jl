@@ -156,7 +156,7 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
                 counter, t, dt, wepar.ev, time() - t0)
         end
         if t > t_array[t_counter]
-            ρ_saved[:, :, t_counter] = state.Q_cons[:, :, 1]
+            # ρ_saved[:, :, t_counter] = state.Q_cons[:, :, 1]
             # plot_system(state.Q_cons[:, :, 1], sys, "Rho", "rho_$(grid_size)_t$(t_counter)_" * string(method))
             # plot_system(state.Q_prim[:, :, 4], sys, "P", "P_$(grid_size)_t$(t_counter)_" * string(method))
             # plot_system(state.Az, sys, "Az", "Az_$(grid_size)_t$(t_counter)_" * string(method))
@@ -188,4 +188,4 @@ function idealmhd(; grid_size=64, γ=5/3, cfl=0.4, t_max=0.0, method=:char)
     # plot_system(T, sys, "T", "T_$(grid_size)_t$(t_counter)_" * string(method))
 end
 
-@time idealmhd(grid_size=128, t_max=0.1, method=:char)
+@time idealmhd(grid_size=64, t_max=0.5, method=:char)

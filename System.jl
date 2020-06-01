@@ -1,12 +1,12 @@
 # Default: T = Float64, S = Int64
 
 struct GridParameters{T, S}
-    nx::S                      # number of points
-    dx::T                      # grid spacing
-    x::StepRangeLen{T, T, T}   # linspace array
-    cr_mesh::UnitRange{S}      # computational range of mesh points
-    cr_cell::UnitRange{S}      # computational range of cell boundaries
-    ghost::S                   # number of ghost points
+    nx::S                         # number of points
+    dx::T                         # grid spacing
+    x::StepRangeLen{T, T, T}      # linspace array
+    cr_mesh::UnitRange{S}         # computational range of mesh points
+    cr_cell::UnitRange{S}         # computational range of cell boundaries
+    ghost::S                      # number of ghost points
 end
 
 struct SystemParameters1D{T, S}
@@ -17,12 +17,12 @@ struct SystemParameters1D{T, S}
 end
 
 struct SystemParameters2D{T, S}
-    gridx::GridParameters{T, S}
-    gridy::GridParameters{T, S}
-    nprim::S
-    ncons::S
-    γ::T
-    A_A::T   # Amplitude of Alfven wave
+    gridx::GridParameters{T, S}   # X-grid
+    gridy::GridParameters{T, S}   # Y-grid
+    nprim::S                      # number of nonconserved variables
+    ncons::S                      # number of conserved variables
+    γ::T                          # adiabatic index
+    A_A::T                        # Amplitude of Alfven wave
 end
 
 function grid(; size=32, min=-1.0, max=1.0, ghost=3)
